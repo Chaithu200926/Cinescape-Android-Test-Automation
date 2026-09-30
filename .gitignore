@@ -1,0 +1,13 @@
+# Files and folders git must NOT upload.
+
+# Installed npm packages (recreated with `npm ci`).
+node_modules/
+# Report, screenshots, videos and logs of the last local run.
+/android-report/
+/android-results/
+# Secrets and local paths. Never commit this file.
+.env
+# App builds are shared separately, never through this public repository.
+*.apk
+*.aab
+*.apk.zip
