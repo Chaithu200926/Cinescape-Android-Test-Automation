@@ -1,6 +1,6 @@
 import { test, expect } from '../src/fixtures';
 
-test('Android app opens on the Sign in screen', async ({ app, snap, androidConfig }) => {
+test('AND-01 Android app opens on the Sign in screen', async ({ app, snap, androidConfig }) => {
   await snap('App launched (splash screen)');
 
   /* The splash screen hands over to the Sign in screen on its own once the app has loaded. */

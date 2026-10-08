@@ -4,8 +4,13 @@ import path from 'node:path';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+/* Reuse the web project's test credentials when available; Android-specific and process env values win. */
+dotenv.config({ path: path.resolve(process.cwd(), '..', 'Test1', '.env') });
+/* The kiosk UAT project shares its test customer's wallet identifiers and wallet OTP with the mobile app. */
+dotenv.config({ path: path.resolve(process.cwd(), '..', 'CinescapeKiosk-UI-Automation', '.env') });
 
 const localAppData = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local');
+const newUserStamp = Date.now().toString();
 
 /** Finds the JDK 17 unpacked under %LOCALAPPDATA%\Java when JAVA_HOME is not set. */
 const findJdk = () => {
@@ -38,6 +43,46 @@ export const androidConfig = {
   videoSeconds: Number(process.env.ANDROID_VIDEO_SECONDS || 1800),
   /* Folder holding ffmpeg.exe, added to PATH for the tests and Appium. */
   ffmpegDir: process.env.FFMPEG_DIR || path.join(localAppData, 'ffmpeg', 'bin'),
+
+  credentials: {
+    username: process.env.ANDROID_TEST_USERNAME || process.env.TEST_USERNAME || '',
+    password: process.env.ANDROID_TEST_PASSWORD || process.env.TEST_PASSWORD || '',
+    pin: process.env.ANDROID_TEST_PIN || process.env.TEST_PIN || '',
+  },
+  secondAccount: {
+    username: process.env.ANDROID_TEST2_USERNAME || process.env.TEST2_USERNAME || '',
+    password: process.env.ANDROID_TEST2_PASSWORD || process.env.TEST2_PASSWORD || '',
+    pin: process.env.ANDROID_TEST2_PIN || process.env.TEST2_PIN || '',
+  },
+  newUser: {
+    email: process.env.ANDROID_TEST_NEW_USER_EMAIL || `kncc.autotest.${newUserStamp}@example.com`,
+    firstName: process.env.ANDROID_TEST_NEW_USER_FIRST_NAME || 'Auto',
+    lastName: process.env.ANDROID_TEST_NEW_USER_LAST_NAME || 'Tester',
+    password: process.env.ANDROID_TEST_NEW_USER_PASSWORD || process.env.TEST_NEW_USER_PASSWORD || 'Auto@Kncc2026',
+    mobile: process.env.ANDROID_TEST_NEW_USER_MOBILE || `5${newUserStamp.slice(-7)}`,
+    // The current APK's Android DOB picker has a lower supported year bound of 2007.
+    dateOfBirth: process.env.ANDROID_TEST_NEW_USER_DATE_OF_BIRTH || '2007-04-05',
+    gender: process.env.ANDROID_TEST_NEW_USER_GENDER || 'male',
+  },
+  newUserOtp: process.env.ANDROID_TEST_NEW_USER_OTP || process.env.TEST_NEW_USER_OTP || '111111',
+  payment: {
+    cardNumber: process.env.ANDROID_TEST_CARD_NUMBER || process.env.TEST_CARD_NUMBER || '',
+    cardExpiry: process.env.ANDROID_TEST_CARD_EXPIRY || process.env.TEST_CARD_EXPIRY || '',
+    cardCvv: process.env.ANDROID_TEST_CARD_CVV || process.env.TEST_CARD_CVV || '',
+    knetNumber: process.env.ANDROID_TEST_KNET_NUMBER || process.env.TEST_KNET_NUMBER || '',
+    knetExpiry: process.env.ANDROID_TEST_KNET_EXPIRY || process.env.TEST_KNET_EXPIRY || '',
+    knetPin: process.env.ANDROID_TEST_KNET_PIN || process.env.TEST_KNET_PIN || '',
+    giftCard: process.env.ANDROID_TEST_GIFT_CARD || process.env.TEST_GIFT_CARD || '',
+    walletCode: process.env.ANDROID_TEST_WALLET_CODE || process.env.KIOSK_WALLET_CODE || '',
+  },
+  /* These belong to the configured kiosk test customer and are only used where an app wallet flow asks for them. */
+  kioskCustomer: {
+    username: process.env.KIOSK_TEST_USERNAME || '',
+    password: process.env.KIOSK_TEST_PASSWORD || '',
+    otp: process.env.KIOSK_TEST_OTP || '',
+    clubCard: process.env.KIOSK_TEST_CLUB_CARD || '',
+    mobile: process.env.KIOSK_TEST_MOBILE || '',
+  },
 };
 
 export type AndroidConfig = typeof androidConfig;

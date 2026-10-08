@@ -25,6 +25,34 @@ const isInstalled = (appPackage: string) => {
   }
 };
 
+/**
+ * The emulator's DNS sometimes stops resolving the UAT API (seen 7 Oct 2026: "Unable to resolve host
+ * apidev.cinescape.com.kw" while the PC resolved it), which shows up as "Something Went Wrong" in the app.
+ * Turning the emulator's Wi-Fi off and on again restores it.
+ */
+const ensureApiReachable = () => {
+  const resolves = () => {
+    try {
+      execFileSync(androidTools.adb, ['shell', 'ping', '-c', '1', '-W', '5', 'apidev.cinescape.com.kw'], {
+        env: androidTools.env(),
+        stdio: 'ignore',
+        timeout: 20_000,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (resolves()) return;
+  try {
+    for (const state of ['disable', 'enable']) {
+      execFileSync(androidTools.adb, ['shell', 'svc', 'wifi', state], { env: androidTools.env(), stdio: 'ignore', timeout: 20_000 });
+      execFileSync(androidTools.adb, ['shell', 'sleep', '5'], { env: androidTools.env(), stdio: 'ignore', timeout: 20_000 });
+    }
+  } catch { /* e.g. more than one device connected; the warning below still reports the problem */ }
+  if (!resolves()) console.warn('[android] The emulator still cannot resolve apidev.cinescape.com.kw; app requests may fail.');
+};
+
 const hasFfmpeg = () => {
   try {
     execFileSync('ffmpeg', ['-version'], { env: androidTools.env(), stdio: 'ignore' });
@@ -44,6 +72,8 @@ export const test = base.extend<AndroidFixtures>({
       !config.apkPath && !isInstalled(config.appPackage),
       `Set ANDROID_APK_PATH in .env to the .apk file, or install ${config.appPackage} on the device first.`,
     );
+
+    ensureApiReachable();
 
     /* webdriverio is only published as an ES module, so it is loaded with import() from this CommonJS project. */
     const { remote } = await import('webdriverio');

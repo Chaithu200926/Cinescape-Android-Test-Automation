@@ -16,6 +16,25 @@ const connectedDevices = () =>
     .filter(([, state]) => state === 'device')
     .map(([serial]) => serial);
 
+/** Keep the visible Android emulator centered on the Windows desktop for every test run. */
+const centerVisibleEmulator = () => {
+  if (process.platform !== 'win32' || androidConfig.headless) return;
+  try {
+    execFileSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', path.join(process.cwd(), 'scripts', 'center-emulator.ps1'),
+      '-AvdName', androidConfig.avdName,
+      '-Port', '5554',
+    ], {
+      env: process.env,
+      stdio: 'ignore',
+      timeout: 20_000,
+    });
+  } catch (error) {
+    console.warn(`[android] Could not center the emulator window: ${String(error)}`);
+  }
+};
+
 const appiumIsUp = async () => {
   try {
     const response = await fetch(`http://127.0.0.1:${androidConfig.appiumPort}/status`);
@@ -95,7 +114,8 @@ const bootEmulator = async (): Promise<ChildProcess> => {
   ensureAvdExists();
   ensureAcceleration();
   console.log(`[android] Starting emulator "${androidConfig.avdName}"...`);
-  const args = ['-avd', androidConfig.avdName, '-no-boot-anim', '-no-snapshot-save', '-gpu', 'auto'];
+  // Read-only mode lets AND-49 boot a second instance from the same AVD for a concurrent seat-hold check.
+  const args = ['-avd', androidConfig.avdName, '-no-boot-anim', '-no-snapshot-save', '-gpu', 'auto', '-read-only'];
   if (androidConfig.headless) args.push('-no-window');
   const emulator = spawn(androidTools.emulator, args, { env: androidTools.env(), stdio: 'ignore', detached: true });
   emulator.unref();
@@ -157,6 +177,7 @@ export default async function globalSetup() {
   Object.assign(process.env, androidTools.env());
 
   const startedEmulator = connectedDevices().length ? undefined : await bootEmulator();
+  centerVisibleEmulator();
   const startedAppium = (await appiumIsUp()) ? undefined : await startAppium();
 
   return async () => {
