@@ -319,7 +319,10 @@ export const selectFutureDateWithShowtimes = async (app: AndroidApp) => {
     if (!currentDates[index]) break;
     const dateText = (await currentDates[index].$$('android.widget.TextView'))[1];
     await tapElementCenter(app, dateText);
-    await app.pause(1_000);
+    // Showtimes load a moment after the date is chosen.
+    await app.waitUntil(async () => await app.$$('id=com.cinescape:id/card_scroll').length > 0, { timeout: 8_000 })
+      .catch(() => undefined);
+    await app.pause(500);
     const showtimes = await app.$$('id=com.cinescape:id/card_scroll');
     if (await showtimes.length > 0) return { dateLabel: dateLabels[index], showtimes };
   }

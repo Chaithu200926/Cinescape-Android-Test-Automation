@@ -7,7 +7,7 @@ import {
 } from '../src/android-navigation';
 
 test('AND-17 Half-price Monday', async ({ app, snap, androidConfig }) => {
-  await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-17', 'primary');
+  await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-17', 'kiosk');
   const { title } = await openFirstMovieDetails(app);
   await snap(`AND-17: showtimes for ${title}`);
 
@@ -129,7 +129,8 @@ test('AND-17 Half-price Monday', async ({ app, snap, androidConfig }) => {
   const comparisonLabels = await comparisonDates.map(async (date) => (
     await date.$$('android.widget.TextView').map(async (label) => (await label.getText()).trim())
   ).filter(Boolean).join(' '));
-  const weekdayIndex = comparisonLabels.findIndex((label) => !/mon(?:day)?/i.test(label));
+  // A later weekday, not today: today's tickets open the food step before the price review.
+  const weekdayIndex = comparisonLabels.findIndex((label) => /^(Tue|Wed|Thu|Fri|Sat|Sun) \d{2}$/.test(label));
   expect(weekdayIndex, 'The app offers another weekday for comparison').toBeGreaterThanOrEqual(0);
   expect(weekdayIndex, `Comparison date is selectable: ${comparisonLabels.join(' | ')}`).toBeLessThan(await comparisonDates.length);
   const weekdayLabel = comparisonLabels[weekdayIndex];
@@ -180,6 +181,13 @@ test('AND-17 Half-price Monday', async ({ app, snap, androidConfig }) => {
     timeout: 60_000,
     timeoutMsg: 'Weekday checkout did not finish loading',
   });
+  // Some shows open the food step first; skipping it leads to the price review.
+  const skipFood = app.$('id=com.cinescape:id/txtSkipBtn');
+  if (await skipFood.isDisplayed().catch(() => false)) {
+    test.info().annotations.push({ type: 'note', description: `The ${weekdayLabel} ticket opened the food step; it was skipped.` });
+    await skipFood.click();
+  }
+  await app.$('id=com.cinescape:id/text_kds').waitForDisplayed({ timeout: 30_000, timeoutMsg: 'The weekday checkout did not show the ticket price' });
   const weekdayPriceText = (await app.$('id=com.cinescape:id/text_kds').getText()).trim();
   const weekdayPrice = Number(/(\d+(?:\.\d{1,3})?)/.exec(weekdayPriceText)?.[1]);
   const weekdayTotalText = (await app.$('id=com.cinescape:id/text_kd_total').getText()).trim();

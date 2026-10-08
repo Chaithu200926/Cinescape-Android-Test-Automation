@@ -9,7 +9,7 @@ import {
 import sharp from 'sharp';
 
 test('AND-19 Seat map rules', async ({ app, snap, androidConfig }) => {
-  await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-19', 'primary');
+  await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-19', 'kiosk');
   const { title } = await openFirstMovieDetails(app);
   const { dateLabel, showtimes } = await selectFutureDateWithShowtimes(app);
   expect(showtimes.length, `The future date "${dateLabel}" has an available showtime`).toBeGreaterThan(0);

@@ -8,7 +8,7 @@ import {
 } from '../src/android-navigation';
 
 test('AND-20 Unpaid seat is released for booking again', async ({ app, snap, androidConfig }) => {
-  await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-20', 'primary');
+  await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-20', 'kiosk');
   const { title } = await openFirstMovieDetails(app);
   const { dateLabel, showtimes } = await selectFutureDateWithShowtimes(app);
   const showtimeLabels = (await showtimes[0].$$('android.widget.TextView')

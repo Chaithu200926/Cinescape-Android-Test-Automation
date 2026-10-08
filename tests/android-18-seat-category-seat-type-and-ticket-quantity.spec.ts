@@ -8,7 +8,7 @@ import {
 } from '../src/android-navigation';
 
 test('AND-18 Seat category, seat type and ticket quantity', async ({ app, snap, androidConfig }) => {
-  await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-18', 'primary');
+  await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-18', 'kiosk');
   const { title } = await openFirstMovieDetails(app);
   await snap(`AND-18: showtimes for ${title}`);
 

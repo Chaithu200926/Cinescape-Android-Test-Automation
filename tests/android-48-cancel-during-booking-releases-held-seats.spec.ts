@@ -7,7 +7,7 @@ import {
 } from '../src/android-navigation';
 
 test('AND-48 Cancel during booking releases held seats', async ({ app, snap, androidConfig }) => {
-  await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-48', 'primary');
+  await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-48', 'kiosk');
   const { title, dateLabel, showtimeLabel, seatRow, seatNumber } = await openSingleSeatCheckout(app, snap, 'AND-48');
   expect(seatRow, 'The held seat has a readable row label').toMatch(/^[A-Z]$/);
   if (!/^[A-Z]$/.test(seatRow)) throw new Error(`The selected seat exposed no readable row: "${seatRow}".`);
