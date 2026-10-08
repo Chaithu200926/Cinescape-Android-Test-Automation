@@ -7,6 +7,8 @@ import {
   openFirstMovieDetails,
   openKnetGateway,
   openPaymentMethods,
+  openUpcomingTicket,
+  readTicketDetails,
   readWalletBalance,
   tapElementCenter,
   tapNativeElementCenter,
@@ -44,7 +46,23 @@ test('AND-31 Payment fails or is cancelled at the gateway', async ({ app, snap, 
   await app.back();
 
   // 4. No booking is listed, the wallet is unchanged and History records the attempt as cancelled.
-  expect(await upcomingBookingIds(app), 'No booking was added').toEqual(idsBefore);
+  // The shared customer's list also changes for other reasons (other suites book; started shows drop off),
+  // so each newly listed booking is opened and must not be the cancelled show and seat.
+  const newIds = (await upcomingBookingIds(app)).filter((bookingId) => !idsBefore.includes(bookingId));
+  for (const bookingId of newIds) {
+    // The list does not always show the same bookings twice in a row; one that is gone again is skipped.
+    const opened = await openUpcomingTicket(app, bookingId).then(() => true, () => false);
+    if (!opened) {
+      test.info().annotations.push({ type: 'note', description: `Booking ${bookingId} was listed once and then no longer shown; not checked.` });
+      continue;
+    }
+    const ticket = await readTicketDetails(app);
+    const sameBooking = ticket.seats.includes(`${seatRow}${seatNumber}`) && ticket.dateTime.includes(showtimeLabel.split(' ')[0])
+      && ticket.movie.toLowerCase().includes(title.toLowerCase().trim());
+    expect(sameBooking, `New booking ${bookingId} (${ticket.movie}, ${ticket.dateTime}, ${ticket.seats.join(' ')}) is not the cancelled one`).toBe(false);
+    await app.back();
+  }
+  if (newIds.length) test.info().annotations.push({ type: 'note', description: `Other bookings appeared meanwhile: ${newIds.join(', ')}` });
   expect(await readWalletBalance(app, 'Wallet balance after the failed payment'), 'The wallet is unchanged').toBeCloseTo(walletBefore, 3);
   const history = await bookingHistory(app);
   expect(history[0]?.status, 'History records the failed attempt as cancelled').toBe('Cancelled');

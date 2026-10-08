@@ -6,6 +6,7 @@ import {
   cleanUpBooking,
   hasKioskCustomer,
   openKnetGateway,
+  openPaymentMethods,
   payWithWallet,
   readKwd,
   readWalletBalance,
@@ -74,10 +75,13 @@ test('AND-25 Cart and price check', async ({ app, snap, androidConfig }) => {
   expect(await openKnetGateway(app), 'The KNET gateway asks for the same total').toBeCloseTo(total, 3);
   await snap(`AND-25: KNET gateway shows KD ${total.toFixed(3)}`);
   await app.back();
-  await app.$('id=com.cinescape:id/paymentLayout').waitForDisplayed({ timeout: 60_000 }).catch(async () => {
-    // Leaving the gateway can end the checkout; start the payment step again from the seat map if so.
-    throw new Error('Leaving the KNET gateway did not return to the payment page.');
-  });
+  // Back on the gateway ends the checkout and returns to movie details, so a new one-seat checkout is opened.
+  const backOnPayment = await app.$('id=com.cinescape:id/paymentLayout').waitForDisplayed({ timeout: 20_000 }).then(() => true, () => false);
+  if (!backOnPayment) {
+    test.info().annotations.push({ type: 'note', description: 'Back on the KNET gateway ends the checkout and returns to movie details.' });
+    const again = await openPaymentMethods(app, snap, 'AND-25');
+    expect(again.total, 'A new one-seat checkout costs the same total').toBeCloseTo(total, 3);
+  }
 
   // 4. After paying, the wallet is charged the same amount.
   let bookingId = '';

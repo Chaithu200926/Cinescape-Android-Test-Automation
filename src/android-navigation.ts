@@ -592,6 +592,12 @@ export const openAccountTop = async (app: AndroidApp) => {
 export const readWalletBalance = async (app: AndroidApp, label = 'Wallet balance') => {
   await openAccountTop(app);
   const balance = app.$(id('text_user_wallet_kd'));
+  // UAT sometimes sends the wallet details late; reopening Account asks for them again.
+  for (let attempt = 0; attempt < 2 && !(await balance.waitForDisplayed({ timeout: 30_000 }).then(() => true, () => false)); attempt += 1) {
+    await openArea(app, 'home');
+    await app.pause(2_000);
+    await openAccountTop(app);
+  }
   await balance.waitForDisplayed({ timeout: 30_000, timeoutMsg: 'The Account screen did not show the wallet balance' });
   return readKwd(await balance.getText(), label);
 };
@@ -764,7 +770,9 @@ export const payWithCreditCard = async (app: AndroidApp, config: AndroidConfig, 
   const wasRecording = await app.stopRecordingScreen().then(() => true, () => false);
   try {
     await app.$(id('cardHolderTextInputEditText')).setValue('Auto Tester');
-    await app.$(id('cardNumberTextInputEditText')).setValue(cardNumber);
+    // A bank offer fills in (and locks) the eligible card number; only an empty field is typed into.
+    const numberField = app.$(id('cardNumberTextInputEditText'));
+    if ((await numberField.getText()).replace(/\D/g, '').length < 12) await numberField.setValue(cardNumber);
     // The form only accepts MM/YY; it may insert the slash itself, so check what it shows.
     const expiry = app.$(id('expireDateTextInputEditText'));
     await expiry.setValue(cardExpiry);
