@@ -66,9 +66,10 @@ export const androidConfig = {
   },
   newUserOtp: process.env.ANDROID_TEST_NEW_USER_OTP || process.env.TEST_NEW_USER_OTP || '111111',
   payment: {
-    cardNumber: process.env.ANDROID_TEST_CARD_NUMBER || process.env.TEST_CARD_NUMBER || '',
-    cardExpiry: process.env.ANDROID_TEST_CARD_EXPIRY || process.env.TEST_CARD_EXPIRY || '',
-    cardCvv: process.env.ANDROID_TEST_CARD_CVV || process.env.TEST_CARD_CVV || '',
+    // No test credit card works on UAT yet (the Web suite's TEST_CARD_* is refused), so only an Android card is used.
+    cardNumber: process.env.ANDROID_TEST_CARD_NUMBER || '',
+    cardExpiry: process.env.ANDROID_TEST_CARD_EXPIRY || '',
+    cardCvv: process.env.ANDROID_TEST_CARD_CVV || '',
     knetNumber: process.env.ANDROID_TEST_KNET_NUMBER || process.env.TEST_KNET_NUMBER || '',
     knetExpiry: process.env.ANDROID_TEST_KNET_EXPIRY || process.env.TEST_KNET_EXPIRY || '',
     knetPin: process.env.ANDROID_TEST_KNET_PIN || process.env.TEST_KNET_PIN || '',

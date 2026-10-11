@@ -2,26 +2,16 @@ import { test, expect } from '../src/fixtures';
 import {
   openArea,
   openSingleSeatCheckout,
+  readKwd,
+  readWalletBalance,
   registerFreshTestAccount,
 } from '../src/android-navigation';
-
-const readKwd = (text: string, label: string) => {
-  const match = /(?:KWD|KD)?\s*([\d,]+(?:\.\d{1,3})?)/i.exec(text);
-  // A newly registered account renders the "Wallet Balance:" label without a number for KWD 0.000.
-  if (!match && /wallet balance\s*:?\s*$/i.test(text)) return 0;
-  if (!match) throw new Error(`${label} did not contain a readable KWD amount: ${text}`);
-  return Number(match[1].replace(/,/g, ''));
-};
 
 test('AND-51 Wallet payment with insufficient balance', async ({ app, snap, androidConfig }) => {
   test.setTimeout(300_000);
   // Generate a fresh account for every run so its wallet starts empty.
   await registerFreshTestAccount(app, androidConfig);
-  await openArea(app, 'account');
-  const balanceElement = app.$('id=com.cinescape:id/text_user_wallet_kd');
-  await balanceElement.waitForDisplayed({ timeout: 20_000, timeoutMsg: 'The signed-in account did not show its wallet balance' });
-  const balanceBeforeText = (await balanceElement.getText()).trim();
-  const balanceBefore = readKwd(balanceBeforeText, 'Wallet balance before booking');
+  const balanceBefore = await readWalletBalance(app, 'Wallet balance before booking');
   await snap('AND-51: insufficient-balance test account wallet balance');
 
   await openArea(app, 'movies');
@@ -102,10 +92,8 @@ test('AND-51 Wallet payment with insufficient balance', async ({ app, snap, andr
   } else {
     await app.back();
   }
-  await openArea(app, 'account');
-  await balanceElement.waitForDisplayed({ timeout: 20_000, timeoutMsg: 'The account wallet balance was not available after cancelling' });
   expect(
-    readKwd(await balanceElement.getText(), 'Wallet balance after cancelling'),
+    await readWalletBalance(app, 'Wallet balance after cancelling'),
     'The wallet balance must remain unchanged after insufficient funds',
   ).toBeCloseTo(balanceBefore, 3);
 });

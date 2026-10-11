@@ -4,9 +4,13 @@ import { test, expect } from '../src/fixtures';
 import { androidTools } from '../src/android-config';
 import {
   AndroidApp,
+  bookingHistory,
+  cleanUpBooking,
   openArea,
   openFirstMovieDetails,
+  readWalletBalance,
   registerFreshTestAccount,
+  retryAfterAppError,
   selectFutureDateWithShowtimes,
   signInAsUser,
   tapElementCenter,
@@ -41,8 +45,9 @@ const openSeatMap = async (app: AndroidApp) => {
   const { dateLabel, showtimes } = await selectFutureDateWithShowtimes(app);
   if ((await showtimes.length) === 0) throw new Error(`No showtime is available for ${dateLabel}.`);
   await tapElementCenter(app, showtimes[0]);
+  // With the second emulator running the PC is slow; seat categories can take over 30 s behind the spinner.
   await app.$('id=com.cinescape:id/select_seat_category').waitForDisplayed({
-    timeout: 30_000,
+    timeout: 90_000,
     timeoutMsg: 'The selected showtime did not open seat categories',
   });
   await app.$('android=new UiSelector().text("General")').click();
@@ -88,6 +93,7 @@ test('AND-49 Concurrent selection of the same seat', async ({ app: appA, snap, a
   ], { env: androidTools.env(), stdio: 'ignore', windowsHide: true });
 
   let appB: AndroidApp | undefined;
+  let bookingIdA = '';
   try {
     if (secondEmulator) {
       const earlyExit = new Promise<never>((_resolve, reject) => {
@@ -117,12 +123,13 @@ test('AND-49 Concurrent selection of the same seat', async ({ app: appA, snap, a
         'appium:newCommandTimeout': 300,
         'appium:adbExecTimeout': 60_000,
         'appium:uiautomator2ServerInstallTimeout': 120_000,
-        'appium:systemPort': 8201,
+        // Outside the range Appium picks from for session A, so the two phones never share a port.
+        'appium:systemPort': 8290,
       },
     }) as AndroidApp;
 
     await openArea(appA, 'movies');
-    const bookingA = await openSeatMap(appA);
+    const bookingA = await retryAfterAppError(appA, 'session A opening the seat map', () => openSeatMap(appA));
     const seatA = await firstAvailableSeat(appA);
     await tapNativeElementCenter(appA, seatA.cell);
     await snap(`AND-49: session A selected ${seatA.label} for ${bookingA.title}`);
@@ -144,7 +151,7 @@ test('AND-49 Concurrent selection of the same seat', async ({ app: appA, snap, a
     await openArea(appB, 'movies');
     let bookingB: Awaited<ReturnType<typeof openSeatMap>>;
     try {
-      bookingB = await openSeatMap(appB);
+      bookingB = await retryAfterAppError(appB, 'session B opening the seat map', () => openSeatMap(appB!));
     } catch (error) {
       await test.info().attach('AND-49: session B screen after movie-list failure', {
         body: Buffer.from(await appB.takeScreenshot(), 'base64'),
@@ -193,28 +200,30 @@ test('AND-49 Concurrent selection of the same seat', async ({ app: appA, snap, a
     }
     await appA.$('android=new UiSelector().textContains("Use your Wallet")').click();
     await appA.$('id=com.cinescape:id/textview_bt_wallet_apply').click();
+    // Applying the wallet covers the amount (Apply turns into Cancel); Proceed then confirms the booking.
+    await appA.$('id=com.cinescape:id/textview_bt_wallet_cancel').waitForDisplayed({ timeout: 30_000, timeoutMsg: 'Session A wallet was not applied' });
+    await appA.$('id=com.cinescape:id/txt_proceed').click();
     const confirmationId = appA.$('id=com.cinescape:id/text_bookin_id_no');
     await confirmationId.waitForDisplayed({ timeout: 90_000, timeoutMsg: 'Session A did not complete its booking with the held seat' });
-    const bookingIdA = (await confirmationId.getText()).trim();
+    bookingIdA = (await confirmationId.getText()).trim();
     expect(bookingIdA, 'The seat holder should receive one confirmed Booking ID').toMatch(/^[A-Z0-9]{5,}$/i);
 
     await appA.background(2);
     await appA.activateApp(androidConfig.appPackage);
-    await openArea(appA, 'account');
-    const balanceAAfter = readKwd(await balanceAElement.getText(), 'Session A wallet balance after confirmation');
+    const balanceAAfter = await readWalletBalance(appA, 'Session A wallet balance after confirmation');
     expect(balanceABefore - balanceAAfter, 'Session A should be charged once for the held seat')
       .toBeCloseTo(total, 3);
 
     const dismiss = appB.$('id=com.cinescape:id/positive_btn');
     if (await dismiss.isDisplayed().catch(() => false)) await dismiss.click();
-    await openArea(appB, 'account');
-    const balanceBAfter = readKwd(await balanceBElement.getText(), 'Session B wallet balance after conflict');
+    const balanceBAfter = await readWalletBalance(appB, 'Session B wallet balance after conflict');
     expect(balanceBAfter, 'Session B must not be charged for the conflicting seat').toBeCloseTo(balanceBBefore, 3);
-    expect(await appB.$('id=com.cinescape:id/noHistory').isDisplayed().catch(() => false),
-      'Session B must not create a booking for the conflicting seat').toBe(true);
+    expect(await bookingHistory(appB), 'Session B (a fresh account) must not have any booking for the conflicting seat').toEqual([]);
     await snap(`AND-49: session A booked ${seatA.label} as ${bookingIdA}; session B was blocked without charge`);
   } finally {
     await appB?.deleteSession().catch(() => undefined);
+    // The paid test booking is cancelled so nothing stays booked on the shared test customer.
+    if (bookingIdA) await cleanUpBooking(appA, bookingIdA);
     if (secondEmulator) {
       try {
         execFileSync(androidTools.adb, ['-s', secondSerial, 'emu', 'kill'], { env: androidTools.env(), timeout: 15_000 });

@@ -4,6 +4,7 @@ import {
   amountToBePaid,
   beginCaseJourney,
   cancelBooking,
+  cancelUnpaidCheckout,
   cleanUpBooking,
   hasKioskCustomer,
   openPaymentMethods,
@@ -18,13 +19,18 @@ test('AND-30 Pay with a bank offer', async ({ app, snap, androidConfig }) => {
     throw new Error('AND-30 needs the configured Kiosk UAT customer (username, password and OTP).');
   }
   const eligibleCard = androidConfig.payment.cardNumber;
-  if (!eligibleCard) throw new Error('Set TEST_CARD_NUMBER: the UAT test card is the one eligible for the bank offer.');
 
   await beginCaseJourney(app, androidConfig, snap, 'account', true, 'AND-30', 'kiosk');
   const walletBefore = await readWalletBalance(app, 'Wallet balance before booking');
 
   // 1. Book a ticket and open the bank offers; choose the first offer.
   const { total } = await openPaymentMethods(app, snap, 'AND-30');
+  // Bank offers are UAT set-up data; on 11 Oct 2026 none was configured and the panel was not shown.
+  if (!(await app.$('android=new UiSelector().text("Use a Bank Offer")').isDisplayed().catch(() => false))) {
+    await snap('AND-30: payment methods without a bank offer');
+    await cancelUnpaidCheckout(app);
+    test.skip(true, 'UAT currently offers no bank offer: the payment list has no "Use a Bank Offer" panel.');
+  }
   await openPaymentPanel(app, 'Use a Bank Offer');
   await app.$('id=com.cinescape:id/spinner_card_options').click();
   const offers = await app.$$('id=com.cinescape:id/textView21').map(async (option) => (await option.getText()).trim());
@@ -43,6 +49,11 @@ test('AND-30 Pay with a bank offer', async ({ app, snap, androidConfig }) => {
   expect(refusal, 'An ineligible card is refused for the bank offer').toMatch(/not applicable/i);
   expect(await amountToBePaid(app), 'A refused card keeps the full price').toBeCloseTo(total, 3);
   await snap(`AND-30: ineligible card refused - "${refusal}"`);
+  if (!eligibleCard) {
+    // Nothing was paid; the unpaid checkout is left so its seat hold is released.
+    await cancelUnpaidCheckout(app);
+    test.skip(true, 'No UAT test credit card eligible for the bank offer is available (set ANDROID_TEST_CARD_NUMBER/EXPIRY/CVV); checked up to the ineligible-card refusal only.');
+  }
 
   // 2. The eligible test card applies the discount and lowers the total; only Credit Card stays payable.
   await cardInput.clearValue();

@@ -2,6 +2,7 @@ import { test, expect } from '../src/fixtures';
 import {
   beginCaseJourney,
   cancelBooking,
+  cancelUnpaidCheckout,
   cleanUpBooking,
   hasKioskCustomer,
   openCreditCardForm,
@@ -24,6 +25,13 @@ test('AND-28 Pay by credit card', async ({ app, snap, androidConfig }) => {
   // 1. Book one ticket and choose Credit Card; the card form asks for the booking total.
   const { title, seatRow, seatNumber, total } = await openPaymentMethods(app, snap, 'AND-28');
   expect(await openCreditCardForm(app), 'The card form charges the booking total').toBeCloseTo(total, 3);
+  await snap(`AND-28: credit card form asks for KWD ${total.toFixed(3)}`);
+  if (!androidConfig.payment.cardNumber) {
+    // Nothing was paid; the unpaid checkout is left so its seat hold is released.
+    await app.back();
+    await cancelUnpaidCheckout(app);
+    test.skip(true, 'No UAT test credit card is available (set ANDROID_TEST_CARD_NUMBER/EXPIRY/CVV); checked up to the card form only.');
+  }
   let bookingId = '';
   let cancelled = false;
   try {

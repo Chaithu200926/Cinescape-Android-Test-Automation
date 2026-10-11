@@ -12,11 +12,26 @@ const dismissGenericAppError = async (app: AndroidApp) => {
   const titleText = (await title.getText().catch(() => '')).trim().toLowerCase();
   const knownError = messageText === 'something went wrong'
     || (titleText === 'cinescape' && (messageText === '' || messageText === 'null'));
-  if (!knownError) return;
+  if (!knownError) return false;
 
   const confirm = app.$('id=com.cinescape:id/positive_btn');
   await confirm.click();
   await app.pause(500);
+  return true;
+};
+
+/**
+ * Runs a step and, if it failed behind UAT's intermittent "Something Went Wrong" dialog,
+ * dismisses the dialog and runs it once more. Each retry is recorded in the report.
+ */
+export const retryAfterAppError = async <T>(app: AndroidApp, step: string, action: () => Promise<T>): Promise<T> => {
+  try {
+    return await action();
+  } catch (error) {
+    if (!(await dismissGenericAppError(app).catch(() => false))) throw error;
+    test.info().annotations.push({ type: 'uat-error', description: `UAT showed "Something Went Wrong" during: ${step}; retried once.` });
+    return action();
+  }
 };
 
 const waitForAppEntryState = async (app: AndroidApp) => {
@@ -225,20 +240,25 @@ export const openArea = async (app: AndroidApp, area: AndroidArea) => {
   for (let backCount = 0; backCount < 5 && !(await tab.isDisplayed().catch(() => false)); backCount += 1) {
     await app.back();
     await app.pause(500);
+    // A UAT "Something Went Wrong" dialog can appear while backing out and hides the tab bar.
+    await dismissGenericAppError(app);
   }
-  await tab.waitForDisplayed({
+  await app.waitUntil(async () => {
+    await dismissGenericAppError(app);
+    return tab.isDisplayed().catch(() => false);
+  }, {
     timeout: 15_000,
     timeoutMsg: `The ${area} navigation tab was not displayed`,
   });
   await tab.click();
 };
 
-export const openMoviesList = async (app: AndroidApp) => {
+export const openMoviesList = async (app: AndroidApp) => retryAfterAppError(app, 'loading Now Showing', async () => {
   await openArea(app, 'movies');
   const movieCard = app.$('id=com.cinescape:id/card_now_showing');
   await movieCard.waitForDisplayed({ timeout: 30_000, timeoutMsg: 'No Now Showing movie cards loaded' });
   return movieCard;
-};
+});
 
 export type MovieCard = { title: string; rating: string; category: string };
 
@@ -277,12 +297,14 @@ export const openFirstMovieDetails = async (app: AndroidApp) => {
   const title = (await movieCard.$('id=com.cinescape:id/text_movie_title').getText()).trim();
   if (!title) throw new Error('The first Now Showing movie card has no accessible title.');
 
-  const poster = movieCard.$('id=com.cinescape:id/image_now_showing');
-  await poster.waitForDisplayed({ timeout: 15_000, timeoutMsg: `Poster for "${title}" was not displayed` });
-  await poster.click();
-  await app.$('id=com.cinescape:id/screenShowTime').waitForDisplayed({
-    timeout: 30_000,
-    timeoutMsg: `Movie details did not open for "${title}"`,
+  await retryAfterAppError(app, `opening details for "${title}"`, async () => {
+    const poster = movieCard.$('id=com.cinescape:id/image_now_showing');
+    await poster.waitForDisplayed({ timeout: 15_000, timeoutMsg: `Poster for "${title}" was not displayed` });
+    await poster.click();
+    await app.$('id=com.cinescape:id/screenShowTime').waitForDisplayed({
+      timeout: 30_000,
+      timeoutMsg: `Movie details did not open for "${title}"`,
+    });
   });
   return { movieCard, title };
 };
@@ -599,7 +621,13 @@ export const readWalletBalance = async (app: AndroidApp, label = 'Wallet balance
     await openAccountTop(app);
   }
   await balance.waitForDisplayed({ timeout: 30_000, timeoutMsg: 'The Account screen did not show the wallet balance' });
-  return readKwd(await balance.getText(), label);
+  // The field is shown empty first and filled with "Wallet Balance: KWD ..." once the wallet loads.
+  let text = '';
+  await app.waitUntil(async () => /wallet balance/i.test(text = await balance.getText().catch(() => '')), {
+    timeout: 30_000,
+    timeoutMsg: 'The wallet balance text did not load',
+  }).catch(() => undefined);
+  return readKwd(text, label);
 };
 
 /** Opens a one-seat checkout and continues to the payment-method list; nothing is paid. */
