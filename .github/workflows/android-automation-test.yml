@@ -1,0 +1,101 @@
+# Android Automation test: runs the Cinescape Android app suite (AND-xx) on the QA PC and shows the results.
+#
+# The tests need the Android emulator, the UAT APK and the test accounts, which are only on the QA PC, so they
+# run on a self-hosted runner there (label "android", folder C:\actions-runner-android). Start the runner with
+# run.cmd in the logged-in desktop session (not as a service), so the emulator window can open.
+#
+# Paid cases use the shared Kiosk/Web test customer: do not start this while the Kiosk UI or Web UI suites run.
+# Food cases (AND-21..24) only run inside pickup hours; AND-22/23 each spend KWD 2.000 (food orders cannot be cancelled).
+# There is deliberately no pull_request trigger: the runner is inside the office.
+name: Android Automation test
+
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: Only these tests (IDs, e.g. "AND-26 AND-50"); empty = the whole suite
+        type: string
+        default: ''
+
+# One emulator, so never two runs at once; queue them instead.
+concurrency:
+  group: android-automation-test
+  cancel-in-progress: false
+
+jobs:
+  run-tests:
+    name: Run Android tests on the QA PC
+    runs-on: [self-hosted, windows, android]
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Credentials and the APK path are never in the repo. The project normally reads its own .env plus the
+      # Web (Test1) and Kiosk UI .env files beside it; here they are merged into one file, later files winning,
+      # so the order keeps the same priority (Android, then Web, then Kiosk).
+      - name: Use the QA PC's test settings
+        env:
+          PROJECTS: ${{ vars.ANDROID_PROJECTS_DIR || 'C:\softwares\vs code\playwright' }}
+        run: |
+          $files = @("$env:PROJECTS\CinescapeKiosk-UI-Automation\.env", "$env:PROJECTS\Test1\.env", "$env:PROJECTS\CinescapeAndroid-Automation\.env")
+          $merged = foreach ($file in $files) { if (Test-Path -LiteralPath $file) { Get-Content -LiteralPath $file; '' } }
+          Set-Content -LiteralPath .env -Value $merged -Encoding utf8
+
+      # Failed tests do not stop the job; they are reported below. Only "AND-nn" IDs are taken from the input.
+      - name: Run the tests
+        continue-on-error: true
+        env:
+          TESTS: ${{ inputs.tests }}
+        run: |
+          $ids = @([regex]::Matches("$env:TESTS", 'AND-\d{2}') | ForEach-Object { $_.Value.Substring(4) } | Select-Object -Unique)
+          if ($ids.Count -gt 0) { npx playwright test --grep "AND-($($ids -join '|')) " } else { npx playwright test }
+
+      - name: Show test results on this run
+        if: always()
+        run: |
+          $log = 'android-results\test-execution.log.txt'
+          $json = 'android-results\results.json'
+          $lines = @('## Android Automation test', '')
+          if (Test-Path $json) {
+            # results.json holds the videos (tens of MB), too big for Windows PowerShell's ConvertFrom-Json.
+            $lines += "| Passed | Failed | Flaky | Skipped | Duration |", "|---|---|---|---|---|"
+            $lines += (node -e "const s=require('./android-results/results.json').stats;console.log('| '+[s.expected,s.unexpected,s.flaky,s.skipped,Math.round(s.duration/60000)+' min'].join(' | ')+' |')"), ''
+          }
+          if (Test-Path $log) {
+            $lines += '| Result | Test |', '|---|---|'
+            foreach ($m in [regex]::Matches((Get-Content $log -Raw), '\[(PASSED|FAILED|SKIPPED|INTERRUPTED|TIMEDOUT)\][^\n]*> ([^\n>]+?)\s*$', 'Multiline')) {
+              $lines += "| $($m.Groups[1].Value) | $($m.Groups[2].Value) |"
+            }
+          }
+          $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-report
+          path: |
+            android-report
+            android-results/results.xml
+            android-results/test-execution.log.txt
+          retention-days: 14
+
+      # Never leave the settings copy in the runner's work folder.
+      - name: Remove the settings copy
+        if: always()
+        run: Remove-Item .env -ErrorAction SilentlyContinue
+
+      # Mark the run red when any test failed, so failures show in the Actions list.
+      - name: Fail the run if any test failed
+        run: |
+          if (-not (Test-Path 'android-results\results.json')) { Write-Output '::error::No results were produced.'; exit 1 }
+          $failed = [int](node -e "console.log(require('./android-results/results.json').stats.unexpected)")
+          Write-Output "Failed tests: $failed"
+          if ($failed -gt 0) { Write-Output "::error::$failed test(s) failed. See the summary and the android-report artifact."; exit 1 }
