@@ -33,11 +33,24 @@ const waitForDeviceBoot = async (serial: string, timeoutMs = 180_000) => {
       const booted = execFileSync(androidTools.adb, ['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], {
         env: androidTools.env(), encoding: 'utf8', timeout: 10_000,
       }).trim();
-      if (booted === '1') return;
+      if (booted === '1') break;
     } catch { /* emulator is still starting */ }
     await sleep(2_000);
   }
-  throw new Error(`The second Android emulator ${serial} did not finish booting within ${timeoutMs / 1000}s.`);
+  if (Date.now() >= end) throw new Error(`The second Android emulator ${serial} did not finish booting within ${timeoutMs / 1000}s.`);
+  // A freshly booted emulator can report boot complete before its network is up; the app then says
+  // "No internet connection" during sign-up.
+  const networkEnd = Date.now() + 120_000;
+  while (Date.now() < networkEnd) {
+    try {
+      execFileSync(androidTools.adb, ['-s', serial, 'shell', 'ping', '-c', '1', '-W', '3', '8.8.8.8'], {
+        env: androidTools.env(), stdio: 'ignore', timeout: 10_000,
+      });
+      return;
+    } catch { /* network not up yet */ }
+    await sleep(3_000);
+  }
+  throw new Error(`The second Android emulator ${serial} booted but had no internet connection within 120s.`);
 };
 
 const openSeatMap = async (app: AndroidApp) => {
@@ -128,6 +141,11 @@ test('AND-49 Concurrent selection of the same seat', async ({ app: appA, snap, a
       },
     }) as AndroidApp;
 
+    // Session B signs up before session A holds the seat: sign-up on the just-booted second phone is slow
+    // and would otherwise use up the hold's countdown.
+    await registerFreshTestAccount(appB, androidConfig);
+    const balanceBBefore = await readWalletBalance(appB, 'Session B wallet balance before competing for the seat');
+
     await openArea(appA, 'movies');
     const bookingA = await retryAfterAppError(appA, 'session A opening the seat map', () => openSeatMap(appA));
     const seatA = await firstAvailableSeat(appA);
@@ -143,11 +161,6 @@ test('AND-49 Concurrent selection of the same seat', async ({ app: appA, snap, a
       timeoutMsg: 'Session A did not reach checkout after holding its seat',
     });
 
-    await registerFreshTestAccount(appB, androidConfig);
-    await openArea(appB, 'account');
-    const balanceBElement = appB.$('id=com.cinescape:id/text_user_wallet_kd');
-    await balanceBElement.waitForDisplayed({ timeout: 15_000, timeoutMsg: 'Session B did not show its fresh wallet balance' });
-    const balanceBBefore = readKwd(await balanceBElement.getText(), 'Session B wallet balance before competing for the seat');
     await openArea(appB, 'movies');
     let bookingB: Awaited<ReturnType<typeof openSeatMap>>;
     try {
@@ -220,6 +233,19 @@ test('AND-49 Concurrent selection of the same seat', async ({ app: appA, snap, a
     expect(balanceBAfter, 'Session B must not be charged for the conflicting seat').toBeCloseTo(balanceBBefore, 3);
     expect(await bookingHistory(appB), 'Session B (a fresh account) must not have any booking for the conflicting seat').toEqual([]);
     await snap(`AND-49: session A booked ${seatA.label} as ${bookingIdA}; session B was blocked without charge`);
+  } catch (error) {
+    // The fixture only captures session A; keep session B's screen too.
+    if (appB) {
+      await test.info().attach('AND-49: session B final screen', {
+        body: Buffer.from(await appB.takeScreenshot(), 'base64'),
+        contentType: 'image/png',
+      }).catch(() => undefined);
+      await test.info().attach('session B screen layout', {
+        body: await appB.getPageSource(),
+        contentType: 'application/xml',
+      }).catch(() => undefined);
+    }
+    throw error;
   } finally {
     await appB?.deleteSession().catch(() => undefined);
     // The paid test booking is cancelled so nothing stays booked on the shared test customer.

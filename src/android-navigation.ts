@@ -505,16 +505,32 @@ export const registerFreshTestAccount = async (app: AndroidApp, config: AndroidC
     await app.$('id=android:id/button1').click();
     await app.$(`id=com.cinescape:id/${gender}`).click();
     await app.execute('mobile: swipeGesture', { left: 80, top: 900, width: 920, height: 1300, direction: 'up', percent: 0.75 });
-    await app.$('id=com.cinescape:id/signup_btn').click();
-
-    await otpEmail.waitForDisplayed({ timeout: 30_000, timeoutMsg: 'Registration did not open email OTP verification' });
+    // On a heavily loaded PC (AND-49 runs two emulators) the sign-up request can fail with
+    // "No internet connection"; the form keeps its values, so Sign up is pressed again.
+    const noInternet = app.$('android=new UiSelector().resourceId("com.cinescape:id/subtitle").text("No internet connection")');
+    for (let attempt = 1; ; attempt += 1) {
+      await app.$('id=com.cinescape:id/signup_btn').click();
+      await app.waitUntil(async () => (await otpEmail.isDisplayed().catch(() => false)) || (await noInternet.isDisplayed().catch(() => false)), {
+        timeout: 30_000,
+        timeoutMsg: 'Registration did not open email OTP verification',
+      });
+      if (!(await noInternet.isDisplayed().catch(() => false))) break;
+      if (attempt === 3) throw new Error('Registration failed three times with "No internet connection"');
+      test.info().annotations.push({ type: 'uat-error', description: `Sign-up attempt ${attempt} failed with "No internet connection"; retried.` });
+      await app.$('id=com.cinescape:id/positive_btn').click();
+      await app.pause(5_000);
+    }
     await otpEmail.setValue(config.newUserOtp);
     if (await otpMobile.isDisplayed().catch(() => false)) await otpMobile.setValue(config.newUserOtp);
     await app.$('id=com.cinescape:id/textView150').click();
     const home = app.$('id=com.cinescape:id/homeUi');
     const personalization = app.$('id=com.cinescape:id/btn_get_personal');
-    await app.waitUntil(async () => (await home.isDisplayed()) || (await personalization.isDisplayed()), {
-      timeout: 60_000,
+    await app.waitUntil(async () => {
+      // UAT's intermittent "Something Went Wrong" can cover the screen after verification.
+      await dismissGenericAppError(app);
+      return (await home.isDisplayed()) || (await personalization.isDisplayed());
+    }, {
+      timeout: 90_000,
       timeoutMsg: 'The new account did not reach Home or personalization after OTP verification',
     });
     if (await personalization.isDisplayed().catch(() => false)) {

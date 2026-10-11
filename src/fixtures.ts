@@ -93,7 +93,8 @@ export const test = base.extend<AndroidFixtures>({
         'appium:appActivity': config.appActivity,
         'appium:appWaitActivity': '*',
         'appium:autoGrantPermissions': true,
-        'appium:newCommandTimeout': 300,
+        // AND-49 leaves this session idle while a second emulator boots and signs up (over 5 minutes).
+        'appium:newCommandTimeout': 900,
         'appium:adbExecTimeout': 60_000,
         'appium:uiautomator2ServerInstallTimeout': 120_000,
       },
