@@ -3,6 +3,7 @@ import {
   type AndroidApp,
   beginCaseJourney,
   cancelUnpaidCheckout,
+  openFirstMovieDetails,
   openMoviesList,
   readMovieList,
   selectOneSeat,
@@ -31,18 +32,10 @@ test('AND-12 Movie lists and movie details', async ({ app, snap, androidConfig }
   await snap(`AND-12: ${movies.length} Now Showing movies with poster, title, rating and language`);
 
   // 3. The first movie's details match its card and Movie Info lists every detail.
-  // The first card whose title is on screen (the grid may stop a little below its top).
-  let card: WebdriverIO.Element | undefined;
-  let cardTitle = '';
-  for (const candidate of await app.$$(id('card_now_showing'))) {
-    const [title] = await candidate.$$(id('text_movie_title'));
-    if (title && (cardTitle = (await title.getText()).trim())) { card = candidate; break; }
-  }
-  if (!card) throw new Error('No Now Showing card shows its title.');
+  // Opened the same way the booking in step 4 opens its movie, so both steps use the same film.
+  const { title: cardTitle } = await openFirstMovieDetails(app);
   const listed = movies.find((movie) => movie.title === cardTitle);
   if (!listed) throw new Error(`The first card "${cardTitle}" was not read from the list.`);
-  await card.$(id('image_now_showing')).click();
-  await app.$(id('screenShowTime')).waitForDisplayed({ timeout: 30_000, timeoutMsg: `Movie details did not open for ${cardTitle}` });
   expect(await text(id('text_film_house_name'))(app)).toBe(listed.title);
   expect(await text(id('textView56'))(app)).toBe(listed.rating);
   const header = (await text(id('text_movie_type'))(app)).split('|').map((part) => part.trim());

@@ -85,7 +85,17 @@ test('AND-50 Reopen booking confirmation without duplicate booking', async ({ ap
 
     // 4. Still one booking and one payment: no new Booking ID and no further charge.
     const idsAfterRevisit = await upcomingBookingIds(app);
-    expect(idsAfterRevisit.filter((id) => !idsAfterReopen.includes(id)), 'Revisiting the ticket adds no booking').toEqual([]);
+    // Food orders are listed with the bookings and can show up late (e.g. AND-22/23's orders), so they are not counted.
+    const newTickets: string[] = [];
+    for (const id of idsAfterRevisit.filter((listed) => !idsAfterReopen.includes(listed))) {
+      await openUpcomingTicket(app, id);
+      const foodDetails = app.$('android=new UiSelector().text("Food Details")');
+      if (await foodDetails.waitForDisplayed({ timeout: 8_000 }).then(() => true, () => false)) {
+        test.info().annotations.push({ type: 'note', description: `Food order ${id} appeared in Upcoming Bookings; not a ticket booking.` });
+      } else newTickets.push(id);
+      await app.back();
+    }
+    expect(newTickets, 'Revisiting the ticket adds no booking').toEqual([]);
     expect(await readWalletBalance(app, 'Wallet balance after revisiting'), 'Revisiting the ticket charges nothing more')
       .toBeCloseTo(balanceAfterReopen, 3);
 

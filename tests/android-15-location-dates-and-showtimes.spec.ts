@@ -54,22 +54,23 @@ const swipeDateStrip = async (app: AndroidApp, direction: 'left' | 'right') => {
 
 /** Every date the strip offers, in order, gathered by scrolling it end to end. */
 const allDates = async (app: AndroidApp) => {
-  for (let swipe = 0; swipe < 4; swipe += 1) await swipeDateStrip(app, 'right');
+  for (let swipe = 0; swipe < 12; swipe += 1) await swipeDateStrip(app, 'right');
   const labels: string[] = [];
-  for (let page = 0; page < 6; page += 1) {
+  for (let page = 0; page < 15; page += 1) {
     const before = labels.length;
     for (const { label } of await visibleDates(app)) if (!labels.includes(label)) labels.push(label);
     if (labels.length === before && page > 0) break;
     await swipeDateStrip(app, 'left');
   }
-  for (let swipe = 0; swipe < 4; swipe += 1) await swipeDateStrip(app, 'right');
+  for (let swipe = 0; swipe < 12; swipe += 1) await swipeDateStrip(app, 'right');
   return labels;
 };
 
 /** The date strip scrolls sideways, so dates are found by label rather than position. */
 const chooseDate = async (app: AndroidApp, label: string) => {
   for (const direction of ['right', 'left'] as const) {
-    for (let swipe = 0; swipe < 5; swipe += 1) {
+    // UAT offers shows a month or more ahead (e.g. Fri 13 Nov seen on 11 Oct), so the strip is long.
+    for (let swipe = 0; swipe < 15; swipe += 1) {
       const match = (await visibleDates(app)).find((date) => date.label === label);
       if (match) {
         await tapElementCenter(app, match.chip.$(id('text_date')));

@@ -67,7 +67,8 @@ test('AND-03 Sign in, Skip and sign out', async ({ app, snap, androidConfig }) =
   await snap(`AND-03: signed in as ${accountName}`);
 
   // 6. Close and reopen the app: the user is still signed in.
-  await app.terminateApp(androidConfig.appPackage);
+  // The default 500 ms wait for the app to stop is too short on a loaded PC.
+  await app.execute('mobile: terminateApp', { appId: androidConfig.appPackage, timeout: 10_000 });
   await app.activateApp(androidConfig.appPackage);
   await app.$('id=com.cinescape:id/homeUi').waitForDisplayed({ timeout: 120_000, timeoutMsg: 'Reopening the app did not return to Home' });
   await openArea(app, 'account');

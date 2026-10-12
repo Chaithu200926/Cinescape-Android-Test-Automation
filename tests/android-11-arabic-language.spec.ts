@@ -110,7 +110,8 @@ test('AND-11 Arabic language', async ({ app, snap, androidConfig }) => {
     }
 
     // 3. Closing and reopening the app keeps Arabic.
-    await app.terminateApp('com.cinescape');
+    // The default 500 ms wait for the app to stop is too short on a loaded PC.
+    await app.execute('mobile: terminateApp', { appId: 'com.cinescape', timeout: 10_000 });
     await app.activateApp('com.cinescape');
     await app.$(id('homeFragment')).waitForDisplayed({ timeout: 240_000, timeoutMsg: 'The app did not reopen' });
     expect(await homeTabName(app), 'Arabic is kept after reopening').toMatch(arabic);

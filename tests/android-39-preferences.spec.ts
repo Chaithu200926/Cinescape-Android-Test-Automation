@@ -54,7 +54,8 @@ const save = async (app: AndroidApp) => {
 };
 
 const relaunch = async (app: AndroidApp, appPackage: string) => {
-  await app.terminateApp(appPackage);
+  // The default 500 ms wait for the app to stop is too short on a loaded PC.
+  await app.execute('mobile: terminateApp', { appId: appPackage, timeout: 10_000 });
   await app.activateApp(appPackage);
   const accountTab = app.$(id('accountFragment'));
   const appMessageOk = app.$(id('positive_btn'));

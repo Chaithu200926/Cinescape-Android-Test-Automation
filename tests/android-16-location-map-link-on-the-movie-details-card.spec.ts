@@ -28,10 +28,13 @@ test('AND-16 Location map link on the movie details card', async ({ app, snap, a
   // 3. The cinema's map link (More > Location) opens Google Maps at Cinescape 360.
   await openArea(app, 'more');
   await app.$(id('textView36')).waitForDisplayed({ timeout: 20_000, timeoutMsg: 'More did not list the cinema location' });
-  expect((await app.$(id('textView36')).getText()).trim()).toBe('Cinescape 360');
-  expect((await app.$(id('textView38')).getText()).trim()).toBe('360 Mall, Zahra');
-  await snap('AND-16: More > Location lists Cinescape 360 with its map pin');
-  await app.$(id('imageView22')).click();
+  // More lists every cinema (Cinescape Ajial joined Cinescape 360 by 11 Oct 2026); each row has a name, address and pin.
+  const names = await app.$$(id('textView36')).map(async (name) => (await name.getText()).trim());
+  const row = names.indexOf('Cinescape 360');
+  expect(row, `More > Location lists Cinescape 360 (listed: ${names.join(', ')})`).toBeGreaterThanOrEqual(0);
+  expect((await (await app.$$(id('textView38')))[row].getText()).trim()).toBe('360 Mall, Zahra');
+  await snap(`AND-16: More > Location lists ${names.join(', ')}; Cinescape 360 has its map pin`);
+  await (await app.$$(id('imageView22')))[row].click();
 
   await app.waitUntil(async () => (await app.getCurrentPackage()) === mapsPackage, {
     timeout: 30_000,

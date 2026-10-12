@@ -125,7 +125,8 @@ test('AND-44 Back navigation and multitasking', async ({ app, snap, androidConfi
   await snap(`AND-44: back on ${title} (${dateLabel}) after leaving checkout`);
 
   /* Force-close and reopen: the customer is still signed in. */
-  await app.terminateApp(androidConfig.appPackage);
+  // The default 500 ms wait for the app to stop is too short on a loaded PC.
+  await app.execute('mobile: terminateApp', { appId: androidConfig.appPackage, timeout: 10_000 });
   expect(await app.queryAppState(androidConfig.appPackage), 'The app process was stopped').toBe(1);
   await app.activateApp(androidConfig.appPackage);
   const accountTab = app.$(id('accountFragment'));
