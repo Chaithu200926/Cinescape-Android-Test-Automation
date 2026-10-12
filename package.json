@@ -5,7 +5,11 @@
   "private": true,
   "scripts": {
     "test": "playwright test",
+    "test:uat": "playwright test -c playwright.uat.config.ts",
+    "test:pre-uat": "playwright test -c playwright.pre-uat.config.ts",
     "report": "playwright show-report android-report",
+    "report:uat": "playwright show-report android-report-uat",
+    "report:pre-uat": "playwright show-report android-report-pre-uat",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {

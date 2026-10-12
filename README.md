@@ -102,15 +102,31 @@ Credentials are optional for guest-only journeys. Android reads its own `.env` f
 ## Run
 
 ```bash
-npm test          # boots the emulator + Appium if needed, installs the APK, runs the tests
-npm run report    # open the report (screenshots + video per test)
-npm run typecheck # check the TypeScript code
+npm test             # boots the emulator + Appium if needed, installs the APK, runs the tests (AWS UAT build)
+npm run test:uat     # the same against the Internal UAT build
+npm run test:pre-uat # the same against the Internal Pre-UAT build
+npm run report       # open the report (screenshots + video per test); report:uat / report:pre-uat for the others
+npm run typecheck    # check the TypeScript code
 ```
+
+### Which build is tested
+
+| Command | Build | App talks to | APK used | Output |
+|---|---|---|---|---|
+| `npm test` | AWS UAT | `apidev.cinescape.com.kw` | `ANDROID_APK_PATH` | `android-report/`, `android-results/` |
+| `npm run test:uat` | Internal UAT | `10.35.1.66:8100` (website `:8103`) | newest `.apk` in `C:\softwares\KNCC testing\Cinescape_Internal_UAT`, or `ANDROID_UAT_APK_PATH` | `android-report-uat/`, `android-results-uat/` |
+| `npm run test:pre-uat` | Internal Pre-UAT | `10.35.1.66:8120` (website `:8123`) | newest `.apk` in `C:\softwares\KNCC testing\Cinescape_Internal_Pre_UAT`, or `ANDROID_PRE_UAT_APK_PATH` | `android-report-pre-uat/`, `android-results-pre-uat/` |
+
+The sites are defined in `src/android-site.ts`; `ANDROID_BUILDS_DIR` moves the folder the Internal builds are read from.
+Credentials are the same for all three. The Internal builds need the office network or VPN. Internal UAT and Pre-UAT
+share one database, and the web suite uses the same customer, so run one of them at a time (see the wallet note).
+All three builds are `com.cinescape`; each test reinstalls the APK, so switching builds needs no manual uninstall.
 
 No phone is needed: when no device is connected, the run creates and boots the `cinescape-pixel` emulator and shuts
 it down afterwards. A phone connected over USB with USB debugging on is used instead when present.
 
-Output goes to `android-report/` (HTML report) and `android-results/` (JUnit, JSON, text log and `appium.log`).
+Output goes to `android-report/` (HTML report) and `android-results/` (JUnit, JSON, text log and `appium.log`), or the
+`-uat` / `-pre-uat` folders above.
 Screens the app marks as secure (for example payment pages) come out black in screenshots and video; that is
 Android's protection, not a test failure.
 
@@ -118,7 +134,8 @@ Android's protection, not a test failure.
 
 | Path | Purpose |
 |---|---|
-| `playwright.config.ts` | Runner settings: one device, one test at a time, reports. |
+| `playwright.config.ts` | Runner settings: one device, one test at a time, reports. `playwright.uat.config.ts` / `playwright.pre-uat.config.ts` run the same with the Internal builds. |
+| `src/android-site.ts` | The builds that can be tested (AWS UAT, Internal UAT, Internal Pre-UAT): API host, APK, report folders. |
 | `src/android-config.ts` | SDK, JDK, emulator, app and Appium settings (from `.env`), and the tool environment. |
 | `src/global-setup.ts` | Creates/boots the emulator and starts Appium when needed; stops what it started. |
 | `src/fixtures.ts` | `app` (Appium session, installs the APK, records video) and `snap` (named step with a screenshot). |

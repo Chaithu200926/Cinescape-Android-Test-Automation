@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { test as base } from '@playwright/test';
 import type { remote } from 'webdriverio' with { 'resolution-mode': 'import' };
-import { androidConfig, androidTools, AndroidConfig } from './android-config';
+import { androidConfig, androidTools, AndroidConfig, apiReachable } from './android-config';
 
 type AndroidApp = Awaited<ReturnType<typeof remote>>;
 
@@ -26,31 +26,22 @@ const isInstalled = (appPackage: string) => {
 };
 
 /**
- * The emulator's DNS sometimes stops resolving the UAT API (seen 7 Oct 2026: "Unable to resolve host
+ * The emulator's DNS sometimes stops resolving the API (seen 7 Oct 2026: "Unable to resolve host
  * apidev.cinescape.com.kw" while the PC resolved it), which shows up as "Something Went Wrong" in the app.
  * Turning the emulator's Wi-Fi off and on again restores it.
  */
 const ensureApiReachable = () => {
-  const resolves = () => {
-    try {
-      execFileSync(androidTools.adb, ['shell', 'ping', '-c', '1', '-W', '5', 'apidev.cinescape.com.kw'], {
-        env: androidTools.env(),
-        stdio: 'ignore',
-        timeout: 20_000,
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  if (resolves()) return;
+  if (apiReachable()) return;
   try {
     for (const state of ['disable', 'enable']) {
       execFileSync(androidTools.adb, ['shell', 'svc', 'wifi', state], { env: androidTools.env(), stdio: 'ignore', timeout: 20_000 });
       execFileSync(androidTools.adb, ['shell', 'sleep', '5'], { env: androidTools.env(), stdio: 'ignore', timeout: 20_000 });
     }
   } catch { /* e.g. more than one device connected; the warning below still reports the problem */ }
-  if (!resolves()) console.warn('[android] The emulator still cannot resolve apidev.cinescape.com.kw; app requests may fail.');
+  if (!apiReachable()) {
+    const { label, apiHost, apiPort } = androidConfig.site;
+    console.warn(`[android] The emulator still cannot reach the ${label} API (${apiHost}:${apiPort}); app requests may fail.`);
+  }
 };
 
 const hasFfmpeg = () => {

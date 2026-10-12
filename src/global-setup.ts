@@ -144,7 +144,7 @@ const bootEmulator = async (): Promise<ChildProcess> => {
 const startAppium = async (): Promise<ChildProcess> => {
   console.log(`[android] Starting Appium on port ${androidConfig.appiumPort}...`);
   const appiumMain = path.join(path.dirname(require.resolve('appium/package.json')), 'index.js');
-  const logDir = path.resolve('android-results');
+  const logDir = path.resolve(androidConfig.site.resultsFolder);
   fs.mkdirSync(logDir, { recursive: true });
   const log = fs.openSync(path.join(logDir, 'appium.log'), 'w');
   const appium = spawn(process.execPath, [appiumMain, '--port', String(androidConfig.appiumPort), '--log-no-colors'], {
@@ -154,11 +154,11 @@ const startAppium = async (): Promise<ChildProcess> => {
 
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
-    if (appium.exitCode !== null) throw new Error('Appium stopped during start-up. See android-results/appium.log.');
+    if (appium.exitCode !== null) throw new Error(`Appium stopped during start-up. See ${androidConfig.site.resultsFolder}/appium.log.`);
     if (await appiumIsUp()) return appium;
     await sleep(1_000);
   }
-  throw new Error('Appium did not start within 60 seconds. See android-results/appium.log.');
+  throw new Error(`Appium did not start within 60 seconds. See ${androidConfig.site.resultsFolder}/appium.log.`);
 };
 
 /**
@@ -170,8 +170,11 @@ export default async function globalSetup() {
     throw new Error(`adb was not found at ${androidTools.adb}. Set ANDROID_HOME to your Android SDK folder.`);
   }
   if (androidConfig.apkPath && !fs.existsSync(androidConfig.apkPath)) {
-    throw new Error(`ANDROID_APK_PATH points to a missing file: ${androidConfig.apkPath}`);
+    throw new Error(`${androidConfig.site.apkEnv} points to a missing file: ${androidConfig.apkPath}`);
   }
+
+  const { label, apiHost, apiPort } = androidConfig.site;
+  console.log(`[android] Testing the ${label} build (${apiHost}:${apiPort}): ${androidConfig.apkPath || 'the copy already installed'}`);
 
   /* Appium's child processes need these too. */
   Object.assign(process.env, androidTools.env());

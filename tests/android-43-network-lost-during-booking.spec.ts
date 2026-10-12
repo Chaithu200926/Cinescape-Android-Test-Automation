@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { test, expect } from '../src/fixtures';
-import { androidTools } from '../src/android-config';
+import { androidTools, apiReachable } from '../src/android-config';
 import {
   beginCaseJourney,
   cancelUnpaidCheckout,
@@ -25,7 +25,7 @@ const setNetwork = (on: boolean) => {
 const waitForNetwork = async (app: AndroidApp) => {
   await app.waitUntil(async () => {
     try {
-      execFileSync(androidTools.adb, ['shell', 'ping', '-c', '1', '-W', '3', 'apidev.cinescape.com.kw'], { env: androidTools.env(), stdio: 'ignore', timeout: 15_000 });
+      if (!apiReachable(3)) return false;
       // The app treats the phone as offline until Android has validated the network, which comes after ping works.
       const connectivity = execFileSync(androidTools.adb, ['shell', 'dumpsys', 'connectivity'], { env: androidTools.env(), encoding: 'utf8', timeout: 15_000 });
       return connectivity.split('\n').some((line) => line.includes('NetworkAgentInfo') && line.includes('CONNECTED') && line.includes('IS_VALIDATED'));
@@ -75,7 +75,8 @@ const recoverFromNetworkError = async (app: AndroidApp, appPackage: string, snap
     description: 'After the network was lost on the payment page, the Network Error page stayed when the network came back (Try Again tapped 6 times over 30 s); the app had to be restarted.',
   });
   await snap('AND-43: Network Error page stays after the network is back');
-  await app.terminateApp(appPackage);
+  // The default 500 ms wait for the app to stop is too short on a loaded PC.
+  await app.execute('mobile: terminateApp', { appId: appPackage, timeout: 10_000 });
   await app.activateApp(appPackage);
   await app.$('id=com.cinescape:id/homeFragment').waitForDisplayed({ timeout: 240_000, timeoutMsg: 'The app did not reopen after the restart' });
 };

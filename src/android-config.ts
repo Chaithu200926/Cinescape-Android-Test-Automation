@@ -1,7 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import dotenv from 'dotenv';
+import { currentSite, siteApkPath } from './android-site';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 /* Reuse the web project's test credentials when available; Android-specific and process env values win. */
@@ -11,6 +13,7 @@ dotenv.config({ path: path.resolve(process.cwd(), '..', 'CinescapeKiosk-UI-Autom
 
 const localAppData = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local');
 const newUserStamp = Date.now().toString();
+const site = currentSite();
 
 /** Finds the JDK 17 unpacked under %LOCALAPPDATA%\Java when JAVA_HOME is not set. */
 const findJdk = () => {
@@ -33,8 +36,10 @@ export const androidConfig = {
   /* Set ANDROID_KEEP_EMULATOR=1 to leave the emulator running after the tests for faster reruns. */
   keepEmulator: process.env.ANDROID_KEEP_EMULATOR === '1',
 
-  /* The .apk to install before each test. Leave empty to test the copy already installed on the device. */
-  apkPath: process.env.ANDROID_APK_PATH ?? '',
+  /* Which build is under test (AWS UAT, Internal UAT or Internal Pre-UAT); see src/android-site.ts. */
+  site,
+  /* The .apk to install before each test. Empty means test the copy already installed on the device. */
+  apkPath: siteApkPath(site),
   appPackage: process.env.ANDROID_APP_PACKAGE || 'com.cinescape',
   appActivity: process.env.ANDROID_APP_ACTIVITY || 'com.cinescape.ui.main.views.splash.SplashActivity',
 
@@ -105,4 +110,18 @@ export const androidTools = {
       process.env.PATH ?? '',
     ].filter(Boolean).join(path.delimiter),
   }),
+};
+
+/** Whether the emulator can reach the API host of the build under test (pings get through to both AWS and 10.35.1.66). */
+export const apiReachable = (waitSeconds = 5) => {
+  try {
+    execFileSync(androidTools.adb, ['shell', 'ping', '-c', '1', '-W', String(waitSeconds), androidConfig.site.apiHost], {
+      env: androidTools.env(),
+      stdio: 'ignore',
+      timeout: (waitSeconds + 15) * 1000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 };
