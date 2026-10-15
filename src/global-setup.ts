@@ -114,8 +114,9 @@ const bootEmulator = async (): Promise<ChildProcess> => {
   ensureAvdExists();
   ensureAcceleration();
   console.log(`[android] Starting emulator "${androidConfig.avdName}"...`);
+  // Always a cold boot: resuming the Quick Boot snapshot carried a slowed-down system over from earlier runs.
   // Read-only mode lets AND-49 boot a second instance from the same AVD for a concurrent seat-hold check.
-  const args = ['-avd', androidConfig.avdName, '-no-boot-anim', '-no-snapshot-save', '-gpu', 'auto', '-read-only'];
+  const args = ['-avd', androidConfig.avdName, '-no-boot-anim', '-no-snapshot-load', '-no-snapshot-save', '-gpu', 'auto', '-read-only'];
   if (androidConfig.headless) args.push('-no-window');
   const emulator = spawn(androidTools.emulator, args, { env: androidTools.env(), stdio: 'ignore', detached: true });
   emulator.unref();
@@ -181,6 +182,21 @@ export default async function globalSetup() {
 
   const startedEmulator = connectedDevices().length ? undefined : await bootEmulator();
   centerVisibleEmulator();
+  /*
+   * Stop the Play Store updating apps during the run: on 15 Oct an Android System WebView update killed the Cinescape
+   * app mid-test ("stop com.google.android.webview due to installPackageLI"), which looked like an app crash.
+   * The emulator boots read-only, so this is done on every run.
+   */
+  try { adb('shell', 'pm', 'disable-user', '--user', '0', 'com.android.vending'); } catch { /* a phone may not allow it */ }
+  /*
+   * The build is installed once per run (-g grants its permissions); each test then clears the app's data instead of
+   * reinstalling it (see the app fixture), which saves about a minute per test and keeps every test independent.
+   */
+  if (androidConfig.apkPath) {
+    console.log('[android] Installing the build once for this run...');
+    try { adb('uninstall', androidConfig.appPackage); } catch { /* not installed */ }
+    execFileSync(androidTools.adb, ['install', '-g', androidConfig.apkPath], { env: androidTools.env(), encoding: 'utf8', timeout: 180_000 });
+  }
   const startedAppium = (await appiumIsUp()) ? undefined : await startAppium();
 
   return async () => {

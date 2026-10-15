@@ -1,9 +1,12 @@
 import { expect, test } from '../src/fixtures';
 import {
   beginCaseJourney,
+  checkoutScreen,
   openFirstMovieDetails,
+  seatMapScreen,
   tapElementCenter,
   tapNativeElementCenter,
+  waitForLoadingStep,
 } from '../src/android-navigation';
 
 test('AND-17 Half-price Monday', async ({ app, snap, androidConfig }) => {
@@ -41,19 +44,12 @@ test('AND-17 Half-price Monday', async ({ app, snap, androidConfig }) => {
   await app.$('id=com.cinescape:id/text_proceeds').click();
 
   const loadingIndicator = app.$('id=com.cinescape:id/progress');
-  await loadingIndicator.waitForDisplayed({
-    timeout: 15_000,
-    timeoutMsg: 'Proceeding with General did not load Monday seat selection',
-  });
-  await loadingIndicator.waitForDisplayed({
-    reverse: true,
-    timeout: 60_000,
-    timeoutMsg: 'Monday seat selection did not finish loading',
-  });
+  await waitForLoadingStep(app, seatMapScreen, 'Proceeding with General did not load Monday seat selection', 'Monday seat selection did not finish loading');
 
   const seatLabels = (await app.$$('android.widget.TextView').map(async (label) => (await label.getText()).trim()))
     .filter(Boolean);
-  expect(seatLabels).toContain('General  |  STANDARD INFINITY VISION');
+  // The screen type differs by environment (AWS: STANDARD INFINITY VISION, Internal: INFINITY).
+  expect(seatLabels.some((label) => /^General\s*\|\s*\S/.test(label)), 'The seat map shows General with its screen type').toBe(true);
   await snap(`AND-17: General/Standard on Monday ${mondayLabel}`);
 
   const seatTypes = app.$('id=com.cinescape:id/text_seat_types');
@@ -67,7 +63,7 @@ test('AND-17 Half-price Monday', async ({ app, snap, androidConfig }) => {
   await app.pause(1_000);
   const typeLabels = (await app.$$('android.widget.TextView').map(async (label) => (await label.getText()).trim()))
     .filter(Boolean);
-  expect(typeLabels).toContain('General  |  STANDARD INFINITY VISION');
+  expect(typeLabels.some((label) => /^General\s*\|\s*\S/.test(label)), 'The seat map still shows General after the type change').toBe(true);
   expect(typeLabels.some((label) => /standard/i.test(label)), 'Standard seat type is offered for Monday')
     .toBe(true);
 
@@ -85,15 +81,7 @@ test('AND-17 Half-price Monday', async ({ app, snap, androidConfig }) => {
   await tapNativeElementCenter(app, availableSeat);
   await app.$('id=com.cinescape:id/txt_proceed').click();
   const checkoutProgress = app.$('id=com.cinescape:id/progress');
-  await checkoutProgress.waitForDisplayed({
-    timeout: 15_000,
-    timeoutMsg: 'Continuing with the Monday seat did not start loading the next booking step',
-  });
-  await checkoutProgress.waitForDisplayed({
-    reverse: true,
-    timeout: 60_000,
-    timeoutMsg: 'The Monday booking did not finish loading its next step',
-  });
+  await waitForLoadingStep(app, checkoutScreen, 'Continuing with the Monday seat did not start loading the next booking step', 'The Monday booking did not finish loading its next step');
   const paymentSource = await app.getPageSource();
   const paymentLabels = (await app.$$('android.widget.TextView').map(async (label) => (await label.getText()).trim()))
     .filter(Boolean);
@@ -146,15 +134,7 @@ test('AND-17 Half-price Monday', async ({ app, snap, androidConfig }) => {
   await app.$('android=new UiSelector().text("General")').click();
   await app.$('id=com.cinescape:id/text_proceeds').click();
   const weekdayLoading = app.$('id=com.cinescape:id/progress');
-  await weekdayLoading.waitForDisplayed({
-    timeout: 15_000,
-    timeoutMsg: 'Proceeding with General did not start loading weekday seats',
-  });
-  await weekdayLoading.waitForDisplayed({
-    reverse: true,
-    timeout: 60_000,
-    timeoutMsg: 'Weekday seat selection did not finish loading',
-  });
+  await waitForLoadingStep(app, seatMapScreen, 'Proceeding with General did not start loading weekday seats', 'Weekday seat selection did not finish loading');
   expect((await app.$('id=com.cinescape:id/tv_seat_timing_date').getText()).toLowerCase())
     .toContain(weekdayLabel.split(/\s+/)[0].toLowerCase());
 
@@ -172,15 +152,7 @@ test('AND-17 Half-price Monday', async ({ app, snap, androidConfig }) => {
   await tapNativeElementCenter(app, weekdaySeat);
   await app.$('id=com.cinescape:id/txt_proceed').click();
   const weekdayCheckoutLoading = app.$('id=com.cinescape:id/progress');
-  await weekdayCheckoutLoading.waitForDisplayed({
-    timeout: 15_000,
-    timeoutMsg: 'Continuing with the weekday seat did not load checkout',
-  });
-  await weekdayCheckoutLoading.waitForDisplayed({
-    reverse: true,
-    timeout: 60_000,
-    timeoutMsg: 'Weekday checkout did not finish loading',
-  });
+  await waitForLoadingStep(app, checkoutScreen, 'Continuing with the weekday seat did not load checkout', 'Weekday checkout did not finish loading');
   // Some shows open the food step first; skipping it leads to the price review.
   const skipFood = app.$('id=com.cinescape:id/txtSkipBtn');
   if (await skipFood.isDisplayed().catch(() => false)) {

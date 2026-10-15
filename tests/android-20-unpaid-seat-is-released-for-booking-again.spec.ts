@@ -1,10 +1,13 @@
 import { expect, test } from '../src/fixtures';
 import {
   beginCaseJourney,
+  checkoutScreen,
   openFirstMovieDetails,
+  seatMapScreen,
   selectFutureDateWithShowtimes,
   tapElementCenter,
   tapNativeElementCenter,
+  waitForLoadingStep,
 } from '../src/android-navigation';
 
 test('AND-20 Unpaid seat is released for booking again', async ({ app, snap, androidConfig }) => {
@@ -25,15 +28,7 @@ test('AND-20 Unpaid seat is released for booking again', async ({ app, snap, and
   await app.$('android=new UiSelector().text("General")').click();
   await app.$('id=com.cinescape:id/text_proceeds').click();
   const categoryLoading = app.$('id=com.cinescape:id/progress');
-  await categoryLoading.waitForDisplayed({
-    timeout: 15_000,
-    timeoutMsg: 'Proceeding with General did not load the seat map',
-  });
-  await categoryLoading.waitForDisplayed({
-    reverse: true,
-    timeout: 60_000,
-    timeoutMsg: 'The seat map did not finish loading',
-  });
+  await waitForLoadingStep(app, seatMapScreen, 'Proceeding with General did not load the seat map', 'The seat map did not finish loading');
 
   const seatTable = app.$('id=com.cinescape:id/seat_table');
   const seats = await seatTable.$$('android.widget.TextView');
@@ -51,15 +46,7 @@ test('AND-20 Unpaid seat is released for booking again', async ({ app, snap, and
   await tapNativeElementCenter(app, selectedSeat);
   await app.$('id=com.cinescape:id/txt_proceed').click();
   const checkoutLoading = app.$('id=com.cinescape:id/progress');
-  await checkoutLoading.waitForDisplayed({
-    timeout: 15_000,
-    timeoutMsg: 'Proceeding with the selected seat did not open checkout',
-  });
-  await checkoutLoading.waitForDisplayed({
-    reverse: true,
-    timeout: 60_000,
-    timeoutMsg: 'The unpaid booking did not finish loading checkout',
-  });
+  await waitForLoadingStep(app, checkoutScreen, 'Proceeding with the selected seat did not open checkout', 'The unpaid booking did not finish loading checkout');
 
   const checkoutLabels = (await app.$$('android.widget.TextView').map(async (label) => (await label.getText()).trim()))
     .filter(Boolean);
@@ -109,15 +96,7 @@ test('AND-20 Unpaid seat is released for booking again', async ({ app, snap, and
   });
   await app.$('android=new UiSelector().text("General")').click();
   await app.$('id=com.cinescape:id/text_proceeds').click();
-  await categoryLoading.waitForDisplayed({
-    timeout: 15_000,
-    timeoutMsg: 'Retrying the show did not start loading its seat map',
-  });
-  await categoryLoading.waitForDisplayed({
-    reverse: true,
-    timeout: 60_000,
-    timeoutMsg: 'Retry seat map did not finish loading',
-  });
+  await waitForLoadingStep(app, seatMapScreen, 'Retrying the show did not start loading its seat map', 'Retry seat map did not finish loading');
   const retrySeats = await app.$('id=com.cinescape:id/seat_table').$$('android.widget.TextView');
   let releasedSeatAvailable = false;
   for (const seat of retrySeats) {

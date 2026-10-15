@@ -7,8 +7,10 @@ import {
   cleanUpBooking,
   hasKioskCustomer,
   openPaymentMethods,
+  payWithKnet,
   payWithWallet,
   readKwd,
+  registerFreshTestAccount,
 } from '../src/android-navigation';
 
 const id = (name: string) => `id=com.cinescape:id/${name}`;
@@ -47,17 +49,25 @@ const readNewestHistoryEntry = async (app: AndroidApp) => {
 
 test('AND-41 Booking history', async ({ app, snap, androidConfig }) => {
   test.setTimeout(600_000);
-  if (!hasKioskCustomer(androidConfig)) {
+  // ANDROID_HISTORY_FRESH_ACCOUNT=1 runs the case with a newly registered customer (empty History, empty wallet), who
+  // pays with the KNET test card; otherwise the Kiosk UAT customer pays from the wallet.
+  const freshAccount = process.env.ANDROID_HISTORY_FRESH_ACCOUNT === '1';
+  if (!freshAccount && !hasKioskCustomer(androidConfig)) {
     throw new Error('AND-41 needs the configured Kiosk UAT customer, whose wallet pays for the booking that is then cancelled.');
   }
 
   // A booking made and cancelled in this run gives History an entry whose details are known.
-  await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-41', 'kiosk');
+  if (freshAccount) {
+    await registerFreshTestAccount(app, androidConfig);
+    await snap(`AND-41: new customer ${androidConfig.newUser.email} signed in`);
+  } else {
+    await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-41', 'kiosk');
+  }
   const { title, total, review } = await openPaymentMethods(app, snap, 'AND-41');
   let bookingId = '';
   let cancelled = false;
   try {
-    bookingId = await payWithWallet(app);
+    bookingId = freshAccount ? await payWithKnet(app, androidConfig, snap, 'AND-41') : await payWithWallet(app);
     await snap(`AND-41: ${title} booked as ${bookingId} for KWD ${total.toFixed(3)}`);
     await cancelBooking(app, bookingId);
     cancelled = true;
@@ -72,7 +82,12 @@ test('AND-41 Booking history', async ({ app, snap, androidConfig }) => {
   const newest = entries[0];
   expect(newest.title, 'The newest History entry is the movie just booked').toBe(review.movie);
   expect(newest.status, 'The cancelled booking is marked Cancelled').toBe('Cancelled');
-  const movieEntries = entries.filter((entry) => entry.title !== 'Wallet Recharge');
+  // Wallet recharges and food-only orders are listed too, but carry no booking status.
+  const movieEntries = entries.filter((entry) => !['Wallet Recharge', 'Food Order'].includes(entry.title));
+  const foodOrders = entries.filter((entry) => entry.title === 'Food Order');
+  if (foodOrders.some((entry) => !entry.status)) {
+    test.info().annotations.push({ type: 'finding', description: 'Food Order entries in History show no status (e.g. paid / prepared / collected).' });
+  }
   for (const entry of movieEntries.filter((item) => item !== newest)) {
     expect(entry.status, `"${entry.title}" (${entry.date}) shows a booking status`).not.toBe('');
   }
@@ -92,7 +107,12 @@ test('AND-41 Booking history', async ({ app, snap, androidConfig }) => {
   expect(details.trackId, 'History shows a Track ID').toMatch(/^\d+$/);
   expect(details.transactionId, 'History shows a Transaction ID').toMatch(/^[1-9]\d*$/);
   expect(details.transactionDateTime, 'History shows when the payment was made').toMatch(/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}$/);
-  expect(details.modes).toEqual(['Wallet']);
+  if (freshAccount) {
+    expect(details.modes.join(' '), 'History names KNET as the payment mode').toMatch(/knet/i);
+    expect(entries.length, 'A new customer has no History beyond this booking').toBeLessThanOrEqual(2);
+  } else {
+    expect(details.modes).toEqual(['Wallet']);
+  }
   expect(details.modeAmounts[0]).toBeCloseTo(total, 3);
   expect(details.grandTotal, 'History Grand Total equals the amount paid').toBeCloseTo(total, 3);
   test.info().annotations.push({

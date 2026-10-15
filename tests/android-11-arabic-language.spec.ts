@@ -4,6 +4,7 @@ import {
   beginCaseJourney,
   openAccountTop,
   openArea,
+  supportChatIsOpen,
   tapElementCenter,
 } from '../src/android-navigation';
 
@@ -20,11 +21,17 @@ const setLanguage = async (app: AndroidApp, language: 'Arabic' | 'English') => {
   await openAccountTop(app);
   const isArabic = arabic.test(await homeTabName(app));
   if (isArabic === (language === 'Arabic')) return;
-  await app.$(id('image_switcherLang')).click();
-  await app.waitUntil(async () => arabic.test(await homeTabName(app).catch(() => '')) === (language === 'Arabic'), {
-    timeout: 30_000,
-    timeoutMsg: `The app did not switch to ${language}`,
-  });
+  const switched = async () => arabic.test(await homeTabName(app).catch(() => '')) === (language === 'Arabic');
+  // On the Internal builds the tap can open the support chat lying over Account instead; then close it and tap again.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await app.pause(1_500);
+    await app.$(id('image_switcherLang')).click();
+    if (await app.waitUntil(switched, { timeout: 15_000 }).then(() => true, () => false)) break;
+    if (!(await supportChatIsOpen(app))) break;
+    await app.back();
+    await app.pause(2_000);
+  }
+  await app.waitUntil(switched, { timeout: 15_000, timeoutMsg: `The app did not switch to ${language}` });
   await app.pause(2_000);
 };
 

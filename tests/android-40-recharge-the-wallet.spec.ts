@@ -1,5 +1,5 @@
 import { test, expect } from '../src/fixtures';
-import { beginCaseJourney, hasKioskCustomer, openAccountTop, readWalletBalance } from '../src/android-navigation';
+import { beginCaseJourney, enterKnetCard, hasKioskCustomer, openAccountTop, readWalletBalance, resumeRecording, tapPastSupportChat } from '../src/android-navigation';
 import type { AndroidApp } from '../src/android-navigation';
 
 const knetField = (app: AndroidApp, resourceId: string) => app.$(`android=new UiSelector().resourceId("${resourceId}")`);
@@ -8,9 +8,9 @@ const gatewayButton = (app: AndroidApp, text: string) => app.$(`android=new UiSe
 /** Account > Recharge Wallet: choose an amount and KNET, then Proceed to the KNET test gateway. */
 const startKnetRecharge = async (app: AndroidApp, amount: number) => {
   await openAccountTop(app);
-  await app.$('id=com.cinescape:id/view_recharge').click();
+  await tapPastSupportChat(app, 'id=com.cinescape:id/view_recharge', 'id=com.cinescape:id/text_select_amount',
+    'Recharge Wallet did not show the amount picker', 30_000);
   const amountPicker = app.$('id=com.cinescape:id/text_select_amount');
-  await amountPicker.waitForDisplayed({ timeout: 30_000, timeoutMsg: 'Recharge Wallet did not show the amount picker' });
   await amountPicker.click();
   let amounts: string[] = [];
   await app.waitUntil(async () => (amounts = await app.$$('id=com.cinescape:id/textView21')
@@ -49,15 +49,12 @@ test('AND-40 Recharge the wallet', async ({ app, snap, androidConfig }) => {
   await snap(`AND-40: KNET gateway for a KWD ${amount} recharge`);
   const wasRecording = await app.stopRecordingScreen().then(() => true, () => false);
   try {
-    await knetField(app, 'debitNumber').setValue(knetNumber);
-    await knetField(app, 'expiryDateInput').setValue(knetExpiry);
-    await knetField(app, 'cardPin').setValue(knetPin);
-    await app.hideKeyboard().catch(() => undefined);
+    await enterKnetCard(app, androidConfig);
     await gatewayButton(app, 'Submit').click();
     const confirm = gatewayButton(app, 'Confirm');
     await confirm.waitForDisplayed({ timeout: 30_000 }).then(() => confirm.click(), () => undefined);
   } finally {
-    if (wasRecording) await app.startRecordingScreen({ timeLimit: String(androidConfig.videoSeconds), bitRate: '4000000', forceRestart: true });
+    if (wasRecording) await resumeRecording(app, androidConfig);
   }
   // The app reports the result on its payment status screen or a message, then returns to the app.
   const failed = app.$('android=new UiSelector().text("FAILED!")');

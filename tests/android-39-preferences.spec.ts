@@ -6,6 +6,7 @@ import {
   acknowledgeAppMessage,
   beginCaseJourney,
   openAccountTop,
+  tapPastSupportChat,
 } from '../src/android-navigation';
 
 const id = (name: string) => `id=com.cinescape:id/${name}`;
@@ -20,8 +21,7 @@ const fingerprint = async (app: AndroidApp, element: WebdriverIO.Element | Chain
 
 const openPreferences = async (app: AndroidApp) => {
   await openAccountTop(app);
-  await app.$(id('view_preference')).click();
-  await app.$(id('spinnerPref')).waitForDisplayed({ timeout: 30_000, timeoutMsg: 'Preferences did not open' });
+  await tapPastSupportChat(app, id('view_preference'), id('spinnerPref'), 'Preferences did not open', 30_000);
   // Scrolling to the end brings every section from Seat Category down to Save fully on screen.
   for (let swipe = 0; swipe < 2; swipe += 1) {
     await app.execute('mobile: scrollGesture', { left: 80, top: 1200, width: 920, height: 1000, direction: 'down', percent: 1.0 });
@@ -70,8 +70,7 @@ test('AND-39 Preferences', async ({ app, snap, androidConfig }) => {
 
   // 1–2. Every preference section is offered.
   await openAccountTop(app);
-  await app.$(id('view_preference')).click();
-  await app.$(id('spinnerPref')).waitForDisplayed({ timeout: 30_000, timeoutMsg: 'Preferences did not open' });
+  await tapPastSupportChat(app, id('view_preference'), id('spinnerPref'), 'Preferences did not open', 30_000);
   const location = (await app.$(id('textView21')).getText()).trim();
   expect(location, 'Preferences show a location').toBe('Cinescape 360');
   expect(await app.$(id('text_find_near_location')).isDisplayed()).toBe(true);

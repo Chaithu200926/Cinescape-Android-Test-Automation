@@ -1,10 +1,13 @@
 import { expect, test } from '../src/fixtures';
 import {
   beginCaseJourney,
+  checkoutScreen,
   openFirstMovieDetails,
+  seatMapScreen,
   selectFutureDateWithShowtimes,
   tapElementCenter,
   tapNativeElementCenter,
+  waitForLoadingStep,
 } from '../src/android-navigation';
 
 test('AND-18 Seat category, seat type and ticket quantity', async ({ app, snap, androidConfig }) => {
@@ -32,15 +35,7 @@ test('AND-18 Seat category, seat type and ticket quantity', async ({ app, snap, 
   await generalCategory.click();
   await app.$('id=com.cinescape:id/text_proceeds').click();
   const loadingIndicator = app.$('id=com.cinescape:id/progress');
-  await loadingIndicator.waitForDisplayed({
-    timeout: 15_000,
-    timeoutMsg: 'Proceeding with General did not start loading the seat-selection screen',
-  });
-  await loadingIndicator.waitForDisplayed({
-    reverse: true,
-    timeout: 60_000,
-    timeoutMsg: 'The seat-selection screen did not finish loading after choosing General',
-  });
+  await waitForLoadingStep(app, seatMapScreen, 'Proceeding with General did not start loading the seat-selection screen', 'The seat-selection screen did not finish loading after choosing General');
   await snap('AND-18: General seat category selected');
 
   const seatSelectionSource = await app.getPageSource();
@@ -48,7 +43,8 @@ test('AND-18 Seat category, seat type and ticket quantity', async ({ app, snap, 
   expect(seatSelectionLabels).toEqual(expect.arrayContaining([
     title,
     'Cinescape 360',
-    'General  |  STANDARD INFINITY VISION',
+    // The screen type differs by environment (AWS: STANDARD INFINITY VISION, Internal: INFINITY).
+    expect.stringMatching(/^General\s*\|\s*\S/),
     'Available',
     'Unavailable',
     'Selected',
@@ -72,15 +68,7 @@ test('AND-18 Seat category, seat type and ticket quantity', async ({ app, snap, 
 
   await app.$('id=com.cinescape:id/txt_proceed').click();
   const checkoutLoading = app.$('id=com.cinescape:id/progress');
-  await checkoutLoading.waitForDisplayed({
-    timeout: 15_000,
-    timeoutMsg: 'Continuing with the selected seat did not start checkout',
-  });
-  await checkoutLoading.waitForDisplayed({
-    reverse: true,
-    timeout: 60_000,
-    timeoutMsg: 'Checkout did not finish loading after a seat was selected',
-  });
+  await waitForLoadingStep(app, checkoutScreen, 'Continuing with the selected seat did not start checkout', 'Checkout did not finish loading after a seat was selected');
   const checkoutLabels = (await app.$$('android.widget.TextView')
     .map(async (label) => (await label.getText()).trim())).filter(Boolean);
   const ticketPriceText = (await app.$('id=com.cinescape:id/text_kds').getText()).trim();

@@ -46,6 +46,11 @@ export const androidConfig = {
   appiumPort: Number(process.env.APPIUM_PORT || 4723),
   /* Android records at most 180 s per clip; longer videos are stitched together with ffmpeg. */
   videoSeconds: Number(process.env.ANDROID_VIDEO_SECONDS || 1800),
+  /*
+   * ANDROID_VIDEO: 'failed' (default) records each test at a modest size and keeps the video only when the test fails;
+   * 'on' keeps every video; 'off' records nothing (least load on the emulator). Screenshots are taken either way.
+   */
+  video: (['on', 'off'].includes(process.env.ANDROID_VIDEO ?? '') ? process.env.ANDROID_VIDEO : 'failed') as 'on' | 'off' | 'failed',
   /* Folder holding ffmpeg.exe, added to PATH for the tests and Appium. */
   ffmpegDir: process.env.FFMPEG_DIR || path.join(localAppData, 'ffmpeg', 'bin'),
 

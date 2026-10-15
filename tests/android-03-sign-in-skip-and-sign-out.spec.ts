@@ -1,5 +1,5 @@
 import { test, expect } from '../src/fixtures';
-import { acknowledgeAppMessage, enterAsGuest, hasPrimaryCredentials, openArea, signInAsUser } from '../src/android-navigation';
+import { acknowledgeAppMessage, enterAsGuest, hasPrimaryCredentials, openArea, signInAsUser, tapPastSupportChat } from '../src/android-navigation';
 
 test('AND-03 Sign in, Skip and sign out', async ({ app, snap, androidConfig }) => {
   await enterAsGuest(app);
@@ -82,13 +82,9 @@ test('AND-03 Sign in, Skip and sign out', async ({ app, snap, androidConfig }) =
     timeout: 15_000,
     timeoutMsg: 'The signed-in Account screen did not expose its Sign Out action',
   });
-  await signOut.click();
-  const confirmSignOut = app.$('id=com.cinescape:id/txtSureNew');
-  await confirmSignOut.waitForDisplayed({
-    timeout: 10_000,
-    timeoutMsg: 'The Sign Out confirmation dialog did not appear',
-  });
-  await confirmSignOut.click();
+  await tapPastSupportChat(app, 'id=com.cinescape:id/text_signout', 'id=com.cinescape:id/txtSureNew',
+    'The Sign Out confirmation dialog did not appear');
+  await app.$('id=com.cinescape:id/txtSureNew').click();
 
   await username.waitForDisplayed({
     timeout: 30_000,

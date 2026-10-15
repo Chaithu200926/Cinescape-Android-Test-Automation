@@ -2,8 +2,10 @@ import { expect, test } from '../src/fixtures';
 import {
   beginCaseJourney,
   openSingleSeatCheckout,
+  seatMapScreen,
   tapElementCenter,
   tapNativeElementCenter,
+  waitForLoadingStep,
 } from '../src/android-navigation';
 
 test('AND-48 Cancel during booking releases held seats', async ({ app, snap, androidConfig }) => {
@@ -64,15 +66,7 @@ test('AND-48 Cancel during booking releases held seats', async ({ app, snap, and
   await app.$('id=com.cinescape:id/text_proceeds').click();
 
   const loading = app.$('id=com.cinescape:id/progress');
-  await loading.waitForDisplayed({
-    timeout: 15_000,
-    timeoutMsg: 'Selecting General did not start loading the seat map',
-  });
-  await loading.waitForDisplayed({
-    reverse: true,
-    timeout: 60_000,
-    timeoutMsg: 'The seat map did not finish loading after cancellation',
-  });
+  await waitForLoadingStep(app, seatMapScreen, 'Selecting General did not start loading the seat map', 'The seat map did not finish loading after cancellation');
 
   const seats = await app.$('id=com.cinescape:id/seat_table').$$('android.widget.TextView');
   let releasedSeatAvailable = false;

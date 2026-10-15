@@ -361,6 +361,27 @@ const todaysShowtimes = async (app: AndroidApp) => {
   return { dateLabel: 'Today', showtimes };
 };
 
+/** What each loading step leads to, so a step counts as started even if its spinner was never seen. */
+export const seatMapScreen = ['id=com.cinescape:id/seat_table'];
+export const checkoutScreen = ['id=com.cinescape:id/uiCheckout', 'id=com.cinescape:id/paymentLayout'];
+
+/**
+ * Waits out the loading step after a tap: the spinner appears, then clears. The Internal servers answer so fast
+ * that the spinner can come and go between two polls, so the next screen showing up also counts as started.
+ */
+export const waitForLoadingStep = async (
+  app: AndroidApp,
+  nextScreen: string[],
+  startMsg: string,
+  finishMsg: string,
+) => {
+  const progress = app.$('id=com.cinescape:id/progress');
+  const shown = async (selector: string) => app.$(selector).isDisplayed().catch(() => false);
+  await app.waitUntil(async () => (await progress.isDisplayed().catch(() => false))
+    || (await Promise.all(nextScreen.map(shown))).some(Boolean), { timeout: 15_000, timeoutMsg: startMsg });
+  await progress.waitForDisplayed({ reverse: true, timeout: 60_000, timeoutMsg: finishMsg });
+};
+
 /** Opens the first movie's next-day (or today's) show in General and selects one available seat (no checkout yet). */
 export const selectOneSeat = async (
   app: AndroidApp,
@@ -383,12 +404,7 @@ export const selectOneSeat = async (
   await app.$('id=com.cinescape:id/text_proceeds').click();
 
   const progress = app.$('id=com.cinescape:id/progress');
-  await progress.waitForDisplayed({ timeout: 15_000, timeoutMsg: 'General did not start loading the seat map' });
-  await progress.waitForDisplayed({
-    reverse: true,
-    timeout: 60_000,
-    timeoutMsg: 'The seat map did not finish loading',
-  });
+  await waitForLoadingStep(app, seatMapScreen, 'General did not start loading the seat map', 'The seat map did not finish loading');
   const seatTable = app.$('id=com.cinescape:id/seat_table');
   const seatCells = await seatTable.$$('android.widget.TextView');
   let selected: WebdriverIO.Element | undefined;
@@ -418,10 +434,9 @@ export const openSingleSeatCheckout = async (
   snap: (label: string) => Promise<void>,
   caseId: string,
 ) => {
-  const { title, dateLabel, showtimeLabel, seatRow, seatNumber, progress } = await selectOneSeat(app, snap, caseId);
+  const { title, dateLabel, showtimeLabel, seatRow, seatNumber } = await selectOneSeat(app, snap, caseId);
   await app.$('id=com.cinescape:id/txt_proceed').click();
-  await progress.waitForDisplayed({ timeout: 15_000, timeoutMsg: 'The selected seat did not start checkout' });
-  await progress.waitForDisplayed({ reverse: true, timeout: 60_000, timeoutMsg: 'Checkout did not finish loading' });
+  await waitForLoadingStep(app, checkoutScreen, 'The selected seat did not start checkout', 'Checkout did not finish loading');
 
   const checkout = app.$('id=com.cinescape:id/uiCheckout');
   const paymentList = app.$('id=com.cinescape:id/paymentLayout');
@@ -618,12 +633,46 @@ export const readKwd = (text: string, label: string) => {
 const id = (name: string) => `id=com.cinescape:id/${name}`;
 const byText = (text: string) => `android=new UiSelector().text("${text}")`;
 
-/** Opens the Account tab scrolled to its top (wallet, Bookings, History, Recharge Wallet). */
+/** The Internal builds' web support chat ("Cinescape chat", Pair AI agent) is open. */
+export const supportChatIsOpen = async (app: AndroidApp) =>
+  app.$('//*[@text="Cinescape chat" or @text="Powered by"]').isDisplayed().catch(() => false);
+
+/**
+ * Closes the support chat when it is open: its own Close button ("إغلاق" in Arabic, the default language), else Back.
+ * On the Internal builds it can open over the Account screen by itself, or from a tap or swipe meant for Account.
+ */
+export const closeSupportChat = async (app: AndroidApp) => {
+  for (let attempt = 0; attempt < 3 && await supportChatIsOpen(app); attempt += 1) {
+    const close = app.$('//*[@text="إغلاق" or @text="Close" or @content-desc="إغلاق" or @content-desc="Close"]');
+    if (await close.isDisplayed().catch(() => false)) await close.click().catch(() => undefined);
+    else await app.back();
+    await app.pause(2_000);
+  }
+};
+
+/**
+ * Taps a control and waits (up to `timeout`) for what it opens. On the Internal builds the support-chat web view lies
+ * over the Account screen while it loads, so a tap can open the chat instead; then the chat is closed and the tap repeated.
+ */
+export const tapPastSupportChat = async (app: AndroidApp, target: string, opens: string, timeoutMsg: string, timeout = 10_000) => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await app.pause(1_500);
+    await closeSupportChat(app);
+    await app.$(target).click();
+    if (await app.$(opens).waitForDisplayed({ timeout }).then(() => true, () => false)) return;
+    if (!(await supportChatIsOpen(app))) break;
+  }
+  throw new Error(timeoutMsg);
+};
+
+/** Opens the Account tab scrolled to its top (wallet, Bookings, History, Recharge Wallet), with the support chat closed. */
 export const openAccountTop = async (app: AndroidApp) => {
   await openArea(app, 'account');
+  await closeSupportChat(app);
   for (let swipe = 0; swipe < 4; swipe += 1) {
     await app.execute('mobile: swipeGesture', { left: 80, top: 600, width: 920, height: 1400, direction: 'down', percent: 0.9 });
   }
+  await closeSupportChat(app);
 };
 
 /** Opens the Account tab and returns the signed-in customer's wallet balance. */
@@ -737,6 +786,54 @@ export const payWithWallet = async (app: AndroidApp) => {
   return waitForConfirmedBooking(app);
 };
 
+/**
+ * Types the test card into the KNET test gateway at a measured pace and checks what each field shows before Submit:
+ * a value that did not land as typed is cleared and typed once more, and a second mismatch stops the test with what
+ * the field holds. The pauses add only a few seconds, as the recharge payment timer is short (about 1-2 minutes).
+ * The card number is reported masked to its last 4 digits, and the PIN only by its length.
+ */
+export const enterKnetCard = async (app: AndroidApp, config: AndroidConfig) => {
+  const { knetNumber, knetExpiry, knetPin } = config.payment;
+  // The KNET test card is used with PIN 1111 (agreed 15 Oct 2026); ANDROID_TEST_KNET_EXPECTED_PIN can name another.
+  const expectedPin = process.env.ANDROID_TEST_KNET_EXPECTED_PIN || '1111';
+  if (knetPin !== expectedPin) throw new Error(`The configured KNET test PIN is not ${expectedPin}; set ANDROID_TEST_KNET_PIN=${expectedPin} in .env.`);
+  const field = (name: string) => app.$(`android=new UiSelector().resourceId("${name}")`);
+  const digits = (value: string) => value.replace(/\D/g, '');
+  const fill = async (name: string, value: string, label: string, entered: (shown: string) => boolean) => {
+    const input = field(name);
+    await input.waitForDisplayed({ timeout: 30_000, timeoutMsg: `The KNET page did not show the ${label} field` });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await input.click();
+      await app.pause(600);
+      if (attempt > 0) await input.clearValue();
+      // Some gateway builds take the expiry as MMYY digits and insert the slash themselves.
+      await input.setValue(attempt > 0 && name === 'expiryDateInput' ? digits(value) : value);
+      await app.pause(800);
+      const shown = (await input.getText().catch(() => '')).trim();
+      if (entered(shown)) return shown;
+    }
+    const shown = (await input.getText().catch(() => '')).trim();
+    throw new Error(`The KNET ${label} was not entered as typed (the field shows "${name === 'cardPin' ? '*'.repeat(shown.length) : shown}")`);
+  };
+  const number = await fill('debitNumber', knetNumber, 'card number', (shown) => digits(shown) === digits(knetNumber));
+  const expiry = await fill('expiryDateInput', knetExpiry, 'expiry date', (shown) => digits(shown) === digits(knetExpiry));
+  // A PIN shown as digits must read exactly the test PIN; a masked PIN (dots) can only be checked by its length.
+  const pin = await fill('cardPin', knetPin, 'PIN', (shown) => (/\d/.test(shown) ? shown === knetPin : shown.length === knetPin.length));
+  const pinCheck = /\d/.test(pin) ? `PIN ${pin} read back` : `PIN ${knetPin} typed (the field masks it: ${pin.length} characters shown)`;
+  await app.hideKeyboard().catch(() => undefined);
+  await app.pause(1_000);
+  test.info().annotations.push({
+    type: 'KNET details',
+    description: `card ending ${digits(number).slice(-4)}, expiry ${expiry}, ${pinCheck} - checked before Submit`,
+  });
+};
+
+/** Restarts the screen recording that is paused while the card is typed (the card stays out of the video). */
+export const resumeRecording = async (app: AndroidApp, config: AndroidConfig) => {
+  if (config.video === 'off') return;
+  await app.startRecordingScreen({ timeLimit: String(config.videoSeconds), bitRate: '1500000', videoSize: '540x1200', forceRestart: true });
+};
+
 /** Chooses KNET, completes the KNET test gateway with the configured test card and returns the Booking ID. */
 export const payWithKnet = async (app: AndroidApp, config: AndroidConfig, snap: (label: string) => Promise<void>, caseId: string) => {
   const { knetNumber, knetExpiry, knetPin } = config.payment;
@@ -748,15 +845,7 @@ export const payWithKnet = async (app: AndroidApp, config: AndroidConfig, snap: 
   const wasRecording = await app.stopRecordingScreen().then(() => true, () => false);
   try {
     // The gateway is a web page, so its fields carry plain HTML ids rather than app resource ids.
-    await app.$('android=new UiSelector().resourceId("debitNumber")').setValue(knetNumber);
-    const expiry = app.$('android=new UiSelector().resourceId("expiryDateInput")');
-    await expiry.setValue(knetExpiry);
-    if (!/^\d{2}\/\d{2}$/.test((await expiry.getText()).trim())) {
-      await expiry.clearValue();
-      await expiry.setValue(knetExpiry.replace(/\D/g, ''));
-    }
-    await app.$('android=new UiSelector().resourceId("cardPin")').setValue(knetPin);
-    await app.hideKeyboard().catch(() => undefined);
+    await enterKnetCard(app, config);
     await app.$('android=new UiSelector().className("android.widget.Button").text("Submit")').click();
     // The test gateway may ask to confirm before returning to the app.
     const confirm = app.$('android=new UiSelector().className("android.widget.Button").text("Confirm")');
@@ -769,9 +858,7 @@ export const payWithKnet = async (app: AndroidApp, config: AndroidConfig, snap: 
     });
     if (await confirm.isDisplayed().catch(() => false)) await confirm.click();
   } finally {
-    if (wasRecording) {
-      await app.startRecordingScreen({ timeLimit: String(config.videoSeconds), bitRate: '4000000', forceRestart: true });
-    }
+    if (wasRecording) await resumeRecording(app, config);
   }
   return waitForConfirmedBooking(app);
 };
@@ -884,16 +971,30 @@ const walkUpcomingTickets = async (app: AndroidApp, stopAt?: string) => {
   let previousScreen = '';
   for (let page = 0; page < 30; page += 1) {
     const cardCount = await app.$$(id('imageView7')).length;
+    // Held food orders ("Food Order", "74 - In Queue", Prepare Food) are listed among the bookings but open no ticket.
+    const foodOrderTops = await app.$$(byText('Food Order')).map(async (label) => (await label.getLocation()).y);
     for (let index = 0; index < cardCount; index += 1) {
       const card = (await app.$$(id('imageView7')))[index];
       if (!card) break;
       const { y } = await card.getLocation();
       const { height } = await card.getSize();
       // Only tap cards fully inside the Account content area (below the header, above the tab bar).
-      if (y < 283 || y + height > 2253) continue;
-      await card.click();
+      // A card clipped by the tab bar reports only its visible sliver (e.g. 46 px); tapping that strip opens the
+      // support chat on the Internal builds, so wait for the scroll to bring the whole card (~520 px) into view.
+      if (y < 283 || y + height > 2253 || height < 300) continue;
+      if (foodOrderTops.some((top) => top >= y && top <= y + height)) continue;
+      // On the Internal builds a tap made while Account is still settling can land on the support-chat launcher
+      // instead of the card; let the screen settle, and if the chat (or anything but the ticket) opens, go back and tap again.
       const ticketId = app.$(id('text_bookin_id_no'));
-      await ticketId.waitForDisplayed({ timeout: 30_000, timeoutMsg: 'An upcoming booking card did not open its ticket' });
+      await app.pause(1_500);
+      await card.click();
+      if (!(await ticketId.waitForDisplayed({ timeout: 15_000 }).catch(() => false))) {
+        await app.back();
+        await app.$(id('recyclerview_booking')).waitForDisplayed({ timeout: 20_000, timeoutMsg: 'Back from the wrong screen did not return to Account' });
+        await app.pause(2_000);
+        await (await app.$$(id('imageView7')))[index].click();
+        await ticketId.waitForDisplayed({ timeout: 30_000, timeoutMsg: 'An upcoming booking card did not open its ticket' });
+      }
       const bookingId = (await ticketId.getText()).trim();
       if (bookingId === stopAt) return ids;
       if (!ids.includes(bookingId)) ids.push(bookingId);
@@ -922,11 +1023,20 @@ export const openUpcomingTicket = async (app: AndroidApp, bookingId: string) => 
 /** Reads the open ticket's details (movie, location, date/time, screen, category and seats). */
 export const readTicketDetails = async (app: AndroidApp) => {
   const text = async (name: string) => (await app.$(id(name)).getText().catch(() => '')).trim();
+  // The AWS build shows "15 Oct 2026 15:00" in one field; the Internal builds show Date and Time as separate fields,
+  // so the time is then the "HH:MM" text on the same row as the date.
+  let dateTime = (await text('txt_date')).replace(/\s+/g, ' ');
+  if (dateTime && !/\d{1,2}:\d{2}/.test(dateTime)) {
+    const dateY = await app.$(id('txt_date')).getLocation().then(({ y }) => y).catch(() => -1);
+    for (const time of await app.$$('android=new UiSelector().textMatches("^\\d{1,2}:\\d{2}$")')) {
+      if (Math.abs((await time.getLocation()).y - dateY) < 40) { dateTime = `${dateTime} ${(await time.getText()).trim()}`; break; }
+    }
+  }
   return {
     bookingId: await text('text_bookin_id_no'),
     movie: await text('text_film_house_name'),
     location: await text('text_location_names'),
-    dateTime: (await text('txt_date')).replace(/\s+/g, ' '),
+    dateTime,
     screen: await text('txt_scrrens'),
     category: await text('categoryName'),
     seats: await app.$$(id('seatNumber')).map(async (seat) => (await seat.getText()).trim()),
@@ -969,7 +1079,10 @@ export type HistoryEntry = { title: string; date: string; status: string };
 /** Opens Account > History and returns its entries, newest first. */
 export const bookingHistory = async (app: AndroidApp) => {
   await openAccountTop(app);
-  await app.$(id('view_historys')).click();
+  // History can take well over 10 s to load when the customer has many bookings.
+  await tapPastSupportChat(app, id('view_historys'),
+    '//*[@resource-id="com.cinescape:id/recyclerview_booking_history" or @resource-id="com.cinescape:id/noHistory"]',
+    'History did not open', 45_000);
   const list = app.$(id('recyclerview_booking_history'));
   const empty = app.$(id('noHistory'));
   await app.waitUntil(async () => (await list.isDisplayed().catch(() => false)) || (await empty.isDisplayed().catch(() => false)), {
@@ -1117,15 +1230,20 @@ export const findHeldFoodOrder = async (app: AndroidApp) => {
   await openAccountTop(app);
   await app.$(id('text_upcoming_booking')).waitForDisplayed({ timeout: 30_000, timeoutMsg: 'Account did not show Your Upcoming Bookings' });
   await app.pause(2_000);
-  const button = app.$('android=new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().resourceId("com.cinescape:id/food_pickup_btn"))');
-  if (!(await button.isDisplayed().catch(() => false))) return undefined;
-  // Keep the whole card above the tab bar before reading it.
-  const { y } = await button.getLocation();
-  if (y > 1900) {
+  // Nothing on Account reports itself as scrollable on the Internal builds, so the list is swiped by hand until a
+  // Prepare Food button sits fully on screen (above the tab bar), or the list stops moving.
+  const held = app.$(id('food_pickup_btn'));
+  let previous = '';
+  for (let swipe = 0; swipe < 25; swipe += 1) {
+    const top = await held.isDisplayed().catch(() => false) ? (await held.getLocation()).y : -1;
+    if (top > 300 && top < 1900) break;
+    const screen = (await app.$$(id('txt_date')).map(async (date) => (await date.getLocation()).y)).join(',');
+    if (screen === previous) break;
+    previous = screen;
     await app.execute('mobile: swipeGesture', { left: 80, top: 1300, width: 920, height: 700, direction: 'up', percent: 0.5 });
     await app.pause(800);
   }
-  const held = app.$(id('food_pickup_btn'));
+  if (!(await held.isDisplayed().catch(() => false))) return undefined;
   const buttonY = (await held.getLocation()).y;
   const nearest = async (name: string) => {
     let best = { distance: Infinity, text: '' };
@@ -1192,5 +1310,7 @@ export const measureImage = async (app: AndroidApp, element: WebdriverIO.Element
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   const dominantShare = Math.max(...counts.values()) / (info.width * info.height);
-  return { judged: true, blank: dominantShare >= 0.9, dominantShare, crop };
+  // A placeholder ("Poster unavailable" on the Internal builds: black with a grey arrow and caption) is not 90% one
+  // colour, but it has only a handful of colours, where any real picture has hundreds.
+  return { judged: true, blank: dominantShare >= 0.9 || counts.size < 40, dominantShare, crop };
 };

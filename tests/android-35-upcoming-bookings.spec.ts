@@ -10,6 +10,7 @@ import {
   openUpcomingTicket,
   payWithWallet,
   readTicketDetails,
+  tapPastSupportChat,
 } from '../src/android-navigation';
 
 const id = (name: string) => `id=com.cinescape:id/${name}`;
@@ -20,21 +21,24 @@ const findUpcomingCard = async (app: AndroidApp, wanted: Pick<UpcomingCard, 'mov
   const seen: UpcomingCard[] = [];
   let previous = '';
   for (let page = 0; page < 20; page += 1) {
-    const cards = await app.$$('//android.widget.GridView[@resource-id="com.cinescape:id/recyclerview_booking"]/*');
-    for (const card of cards) {
-      const read = async (name: string) => (await card.$(id(name)).getText().catch(() => '')).trim();
-      const entry = {
-        movie: await read('text_name_movie'),
-        location: await read('text_location_names'),
-        screen: await read('tv_no_of_screen'),
-        date: await read('txt_date'),
-        time: await read('text_times2'),
-      };
-      if (!entry.movie || !entry.time) continue;
-      seen.push(entry);
-      if (entry.movie === wanted.movie && entry.date === wanted.date && entry.time === wanted.time) return { entry, seen };
-    }
-    const signature = seen.map((card) => `${card.movie}${card.date}${card.time}`).join('|');
+    // A card's fields are siblings in the list, not children of one card element (Internal builds), so each field is
+    // matched to the movie title above it on screen: the first one below the title and above the next title.
+    const at = async (name: string) => app.$$(id(name)).map(async (el) => ({ y: (await el.getLocation()).y, text: (await el.getText()).trim() }));
+    const titles = (await at('text_name_movie')).sort((a, b) => a.y - b.y);
+    const fields = { location: await at('text_location_names'), screen: await at('tv_no_of_screen'), date: await at('txt_date'), time: await at('text_times2') };
+    titles.forEach((title, index) => {
+      const below = (list: { y: number; text: string }[]) =>
+        list.find((field) => field.y > title.y && field.y < (titles[index + 1]?.y ?? Infinity))?.text ?? '';
+      const entry = { movie: title.text, location: below(fields.location), screen: below(fields.screen), date: below(fields.date), time: below(fields.time) };
+      // The same card is read again on the next page when it is still on screen.
+      if (entry.movie && entry.time && !seen.some((card) => JSON.stringify(card) === JSON.stringify(entry))) seen.push(entry);
+    });
+    const match = seen.find((entry) => entry.movie === wanted.movie && entry.date === wanted.date && entry.time === wanted.time);
+    if (match) return { entry: match, seen };
+    // Compare where the dates sit rather than the cards read: a screen of only food orders reads no booking card,
+    // which would otherwise look like the end of the list.
+    const signature = (await app.$$(id('txt_date')).map(async (date) => (await date.getLocation()).y)).join(',')
+      + `#${seen.length}`;
     if (signature === previous) break;
     previous = signature;
     await app.execute('mobile: swipeGesture', { left: 80, top: 1300, width: 920, height: 900, direction: 'up', percent: 0.6 });
@@ -60,8 +64,7 @@ test('AND-35 Upcoming bookings', async ({ app, snap, androidConfig }) => {
 
     // 1–2. Account > Bookings lists the booking with its movie, location, screen, date and time.
     await openAccountTop(app);
-    await app.$(id('view_booking')).click();
-    await app.$(id('text_upcoming_booking')).waitForDisplayed({ timeout: 30_000, timeoutMsg: 'Bookings did not open Your Upcoming Bookings' });
+    await tapPastSupportChat(app, id('view_booking'), id('text_upcoming_booking'), 'Bookings did not open Your Upcoming Bookings', 30_000);
     await app.$(id('recyclerview_booking')).waitForDisplayed({ timeout: 30_000, timeoutMsg: 'Your Upcoming Bookings listed no bookings' });
     const { entry: card, seen } = await findUpcomingCard(app, review);
     expect(card, `Upcoming Bookings lists ${review.movie} on ${review.date} at ${review.time} (listed: ${

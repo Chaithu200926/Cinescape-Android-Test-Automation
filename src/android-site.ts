@@ -59,12 +59,18 @@ const sites: Record<string, AndroidSite> = {
   },
 };
 
-/** The site named by ANDROID_SITE. Read on each call, because the run configs set it after this file is loaded. */
+/**
+ * The site named by ANDROID_SITE. Read on each call, because the run configs set it after this file is loaded.
+ * ANDROID_RUN_TAG (e.g. "old-app-2026-10-14") gives the run its own report and results folders, so a run of another
+ * build of the same site does not overwrite the last one.
+ */
 export const currentSite = (): AndroidSite => {
   const name = (process.env.ANDROID_SITE ?? '').trim().toLowerCase();
   const site = sites[name];
   if (!site) throw new Error(`ANDROID_SITE '${name}' is not one of: ${Object.keys(sites).filter(Boolean).join(', ')} (or empty).`);
-  return site;
+  const tag = (process.env.ANDROID_RUN_TAG ?? '').trim().replace(/[^\w.-]+/g, '-');
+  if (!tag) return site;
+  return { ...site, reportFolder: `${site.reportFolder}-${tag}`, resultsFolder: `${site.resultsFolder}-${tag}` };
 };
 
 /**

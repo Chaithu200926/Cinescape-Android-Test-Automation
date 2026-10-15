@@ -2,9 +2,11 @@ import { expect, test } from '../src/fixtures';
 import {
   beginCaseJourney,
   openFirstMovieDetails,
+  seatMapScreen,
   selectFutureDateWithShowtimes,
   tapElementCenter,
   tapNativeElementCenter,
+  waitForLoadingStep,
 } from '../src/android-navigation';
 import sharp from 'sharp';
 
@@ -24,22 +26,15 @@ test('AND-19 Seat map rules', async ({ app, snap, androidConfig }) => {
   await generalCategory.click();
   await app.$('id=com.cinescape:id/text_proceeds').click();
   const loadingIndicator = app.$('id=com.cinescape:id/progress');
-  await loadingIndicator.waitForDisplayed({
-    timeout: 15_000,
-    timeoutMsg: 'Proceeding with General did not start loading the seat map',
-  });
-  await loadingIndicator.waitForDisplayed({
-    reverse: true,
-    timeout: 60_000,
-    timeoutMsg: 'The seat map did not finish loading',
-  });
+  await waitForLoadingStep(app, seatMapScreen, 'Proceeding with General did not start loading the seat map', 'The seat map did not finish loading');
   await snap('AND-19: General seat map opened');
 
   const labels = (await app.$$('android.widget.TextView').map(async (label) => (await label.getText()).trim())).filter(Boolean);
   expect(labels).toEqual(expect.arrayContaining([
     title,
     'Cinescape 360',
-    'General  |  STANDARD INFINITY VISION',
+    // The screen type differs by environment (AWS: STANDARD INFINITY VISION, Internal: INFINITY).
+    expect.stringMatching(/^General\s*\|\s*\S/),
     'SCREEN',
     'Available',
     'Unavailable',

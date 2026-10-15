@@ -14,13 +14,25 @@ test('AND-08 Home screen content', async ({ app, snap }) => {
   });
   await app.pause(3_000);
 
-  // The banner carousel at the top shows a real image.
-  await app.$(id('viewpager')).$(id('image')).waitForDisplayed({ timeout: 20_000, timeoutMsg: 'The home banner did not load' });
+  // The banner carousel at the top shows a real image. The AWS build has a banner pager (viewpager); the Internal
+  // builds replaced it with a stack of movie posters (posterStack) whose front poster is the widest one.
+  const banner = async (): Promise<WebdriverIO.Element | undefined> => {
+    const [pager] = await app.$$(id('viewpager'));
+    if (pager) return (await pager.$$(id('image')))[0] as unknown as WebdriverIO.Element | undefined;
+    const posters = await app.$(id('posterStack')).$$('android.widget.ImageView');
+    let front: WebdriverIO.Element | undefined;
+    let widest = 0;
+    for (const poster of posters) {
+      const { width } = await poster.getSize();
+      if (width > widest) [front, widest] = [poster, width];
+    }
+    return front;
+  };
+  await app.waitUntil(async () => !!(await banner()), { timeout: 20_000, timeoutMsg: 'The home banner did not load' });
   // The banner image loads after its frame appears, so it is given time to fill in.
   let bannerShown = false;
   for (let attempt = 0; attempt < 10 && !bannerShown; attempt += 1) {
-    const [banner] = await app.$(id('viewpager')).$$(id('image'));
-    bannerShown = !(await imageIsBlank(app, banner));
+    bannerShown = !(await imageIsBlank(app, (await banner())!));
     if (!bannerShown) await app.pause(2_000);
   }
   expect(bannerShown, 'The home banner shows an image').toBe(true);
@@ -49,8 +61,13 @@ test('AND-08 Home screen content', async ({ app, snap }) => {
           const { height } = await image.getSize();
           // Only images fully between the top bar and the tab bar are judged.
           if (y < 128 || y + height > 2253) continue;
-          const { judged, blank, dominantShare, crop } = await measureImage(app, image, screenshot);
+          let { judged, blank, dominantShare, crop } = await measureImage(app, image, screenshot);
           if (!judged) continue;
+          // Posters fill in a few seconds after their cards appear, so a blank one is looked at again before it counts.
+          for (let attempt = 0; attempt < 5 && blank; attempt += 1) {
+            await app.pause(2_000);
+            ({ blank, dominantShare, crop } = await measureImage(app, image));
+          }
           section.images += 1;
           if (blank) {
             const label = (await card.$$(id('textView58')).map(async (name) => (await name.getText()).replace(/\s+/g, ' ').trim())).join(' ');

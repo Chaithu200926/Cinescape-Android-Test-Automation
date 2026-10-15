@@ -5,16 +5,19 @@ import { androidTools } from '../src/android-config';
 import {
   AndroidApp,
   bookingHistory,
+  checkoutScreen,
   cleanUpBooking,
   openArea,
   openFirstMovieDetails,
   readWalletBalance,
   registerFreshTestAccount,
   retryAfterAppError,
+  seatMapScreen,
   selectFutureDateWithShowtimes,
   signInAsUser,
   tapElementCenter,
   tapNativeElementCenter,
+  waitForLoadingStep,
 } from '../src/android-navigation';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -66,8 +69,7 @@ const openSeatMap = async (app: AndroidApp) => {
   await app.$('android=new UiSelector().text("General")').click();
   await app.$('id=com.cinescape:id/text_proceeds').click();
   const progress = app.$('id=com.cinescape:id/progress');
-  await progress.waitForDisplayed({ timeout: 15_000, timeoutMsg: 'Selecting General did not start seat-map loading' });
-  await progress.waitForDisplayed({ reverse: true, timeout: 60_000, timeoutMsg: 'The seat map did not finish loading' });
+  await waitForLoadingStep(app, seatMapScreen, 'Selecting General did not start seat-map loading', 'The seat map did not finish loading');
   await app.$('id=com.cinescape:id/seat_table').waitForDisplayed({ timeout: 15_000, timeoutMsg: 'The show has no visible seat map' });
   return { title, dateLabel, progress, seatTable: app.$('id=com.cinescape:id/seat_table') };
 };
@@ -152,8 +154,7 @@ test('AND-49 Concurrent selection of the same seat', async ({ app: appA, snap, a
     await tapNativeElementCenter(appA, seatA.cell);
     await snap(`AND-49: session A selected ${seatA.label} for ${bookingA.title}`);
     await appA.$('id=com.cinescape:id/txt_proceed').click();
-    await bookingA.progress.waitForDisplayed({ timeout: 15_000, timeoutMsg: 'Session A did not start holding the selected seat' });
-    await bookingA.progress.waitForDisplayed({ reverse: true, timeout: 60_000, timeoutMsg: 'Session A did not finish opening checkout with its seat hold' });
+    await waitForLoadingStep(appA, checkoutScreen, 'Session A did not start holding the selected seat', 'Session A did not finish opening checkout with its seat hold');
     const checkoutA = appA.$('id=com.cinescape:id/uiCheckout');
     const paymentListA = appA.$('id=com.cinescape:id/paymentLayout');
     await appA.waitUntil(async () => (await checkoutA.isDisplayed()) || (await paymentListA.isDisplayed()), {
