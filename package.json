@@ -5,7 +5,11 @@
   "private": true,
   "scripts": {
     "test": "playwright test",
+    "test:uat": "playwright test -c playwright.uat.config.ts",
+    "test:pre-uat": "playwright test -c playwright.pre-uat.config.ts",
     "report": "playwright show-report android-report",
+    "report:uat": "playwright show-report android-report-uat",
+    "report:pre-uat": "playwright show-report android-report-pre-uat",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
@@ -14,6 +18,7 @@
     "appium": "^3.8.0",
     "appium-uiautomator2-driver": "^8.7.0",
     "dotenv": "^18.0.3",
+    "sharp": "^0.35.5",
     "typescript": "^7.0.2",
     "webdriverio": "^9.32.0"
   }
