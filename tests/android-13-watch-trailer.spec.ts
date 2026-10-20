@@ -17,7 +17,20 @@ const rotateDevice = (rotation: 0 | 1) => {
 const playerFrame = async (app: AndroidApp) =>
   createHash('md5').update(await app.takeElementScreenshot(await app.$(id('consVideo')).elementId)).digest('hex');
 
+/**
+ * A short trailer (1:14 on UAT, 18 Oct) can play to its end before a check starts; the YouTube player then stands on
+ * its end frame with "Replay Video", so the picture no longer changes. Replay restarts it before frames are sampled.
+ */
+const replayIfEnded = async (app: AndroidApp) => {
+  const replay = app.$('//*[@text="Replay Video" or @content-desc="Replay Video"]');
+  if (!(await replay.isDisplayed().catch(() => false))) return;
+  test.info().annotations.push({ type: 'note', description: 'The trailer had finished before the check; it was replayed.' });
+  await replay.click();
+  await app.pause(3_000);
+};
+
 const expectPlaying = async (app: AndroidApp, when: string) => {
+  await replayIfEnded(app);
   const first = await playerFrame(app);
   let latest = first;
   await app.waitUntil(async () => (latest = await playerFrame(app)) !== first, {

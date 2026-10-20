@@ -5,7 +5,9 @@ import {
   bookingHistory,
   cancelBooking,
   cleanUpBooking,
+  expandHistoryEntry,
   hasKioskCustomer,
+  newestBookingIndex,
   openPaymentMethods,
   payWithKnet,
   payWithWallet,
@@ -16,9 +18,9 @@ import {
 const id = (name: string) => `id=com.cinescape:id/${name}`;
 const text = async (app: AndroidApp, name: string) => (await app.$(id(name)).getText().catch(() => '')).trim();
 
-/** Expands the newest History entry and reads its booking and payment details. */
-const readNewestHistoryEntry = async (app: AndroidApp) => {
-  await app.$(id('view_booking_history')).click();
+/** Expands the History entry at `index` and reads its booking and payment details. */
+const readHistoryEntry = async (app: AndroidApp, index: number) => {
+  await expandHistoryEntry(app, index);
   await app.$(id('textView_seat_name')).waitForDisplayed({ timeout: 15_000, timeoutMsg: 'The newest History entry did not expand' });
   const booking = {
     location: await text(app, 'text_address'),
@@ -79,7 +81,9 @@ test('AND-41 Booking history', async ({ app, snap, androidConfig }) => {
   const entries = await bookingHistory(app);
   expect(entries.length, 'History lists at least the booking just cancelled').toBeGreaterThan(0);
   for (const entry of entries) expect(entry.title, 'Every History entry names its movie or wallet action').not.toBe('');
-  const newest = entries[0];
+  // Wallet recharges (also by other suites on the shared customer) can be listed above the booking.
+  const newestIndex = newestBookingIndex(entries);
+  const newest = entries[newestIndex];
   expect(newest.title, 'The newest History entry is the movie just booked').toBe(review.movie);
   expect(newest.status, 'The cancelled booking is marked Cancelled').toBe('Cancelled');
   // Wallet recharges and food-only orders are listed too, but carry no booking status.
@@ -94,7 +98,7 @@ test('AND-41 Booking history', async ({ app, snap, androidConfig }) => {
   await snap(`AND-41: History lists ${entries.length} entries, newest ${newest.title} — ${newest.status}`);
 
   // 3. The expanded entry matches what was booked and paid.
-  const details = await readNewestHistoryEntry(app);
+  const details = await readHistoryEntry(app, newestIndex);
   await snap(`AND-41: History details for ${details.bookingId}`);
   expect(details.bookingId, 'History shows the Booking ID from the ticket').toBe(bookingId);
   expect(details.location).toBe(review.location);

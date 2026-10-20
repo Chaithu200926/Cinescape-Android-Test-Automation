@@ -2,7 +2,8 @@ import { test, expect } from '../src/fixtures';
 import {
   beginCaseJourney,
   bookingHistory,
-  firstHistoryPaymentDetails,
+  historyPaymentDetails,
+  newestBookingIndex,
   hasKioskCustomer,
   openFirstMovieDetails,
   openKnetGateway,
@@ -65,8 +66,10 @@ test('AND-31 Payment fails or is cancelled at the gateway', async ({ app, snap, 
   if (newIds.length) test.info().annotations.push({ type: 'note', description: `Other bookings appeared meanwhile: ${newIds.join(', ')}` });
   expect(await readWalletBalance(app, 'Wallet balance after the failed payment'), 'The wallet is unchanged').toBeCloseTo(walletBefore, 3);
   const history = await bookingHistory(app);
-  expect(history[0]?.status, 'History records the failed attempt as cancelled').toBe('Cancelled');
-  const details = await firstHistoryPaymentDetails(app);
+  // Wallet recharges (also by other suites on the shared customer) can be listed above the booking.
+  const newest = newestBookingIndex(history);
+  expect(history[newest]?.status, 'History records the failed attempt as cancelled').toBe('Cancelled');
+  const details = await historyPaymentDetails(app, newest);
   expect(details.trackId, 'History shows the same gateway track number').toBe(trackNumber);
   expect(details.bookingId, 'The failed attempt has no Booking ID').toBe('');
   await snap('AND-31: History records the cancelled payment without a Booking ID');

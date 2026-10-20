@@ -4,7 +4,8 @@ import {
   bookingHistory,
   cancelBooking,
   cleanUpBooking,
-  firstHistoryPaymentDetails,
+  historyPaymentDetails,
+  newestBookingIndex,
   hasKioskCustomer,
   openPaymentMethods,
   openUpcomingTicket,
@@ -57,8 +58,10 @@ test('AND-36 Cancel 2 hours or more before the show; refund credited', async ({ 
   // 3. It leaves Upcoming Bookings and shows as cancelled in History.
   expect(await upcomingBookingIds(app), 'The cancelled booking leaves Upcoming Bookings').not.toContain(bookingId);
   const history = await bookingHistory(app);
-  expect(history[0]?.status, `History shows ${bookingId} as cancelled`).toBe('Cancelled');
-  expect((await firstHistoryPaymentDetails(app)).bookingId, 'The cancelled History entry is this booking').toBe(bookingId);
+  // Wallet recharges (also by other suites on the shared customer) can be listed above the booking.
+  const newest = newestBookingIndex(history);
+  expect(history[newest]?.status, `History shows ${bookingId} as cancelled`).toBe('Cancelled');
+  expect((await historyPaymentDetails(app, newest)).bookingId, 'The cancelled History entry is this booking').toBe(bookingId);
   await snap(`AND-36: ${bookingId} shown as Cancelled in History`);
 
   // 4. The amount paid is credited back to the wallet.

@@ -6,7 +6,8 @@ import {
   bookingHistory,
   cancelBooking,
   cleanUpBooking,
-  firstHistoryPaymentDetails,
+  historyPaymentDetails,
+  newestBookingIndex,
   hasKioskCustomer,
   openPaymentMethods,
   openPaymentPanel,
@@ -62,8 +63,10 @@ test('AND-29 Pay with a gift card', async ({ app, snap, androidConfig }) => {
     expect(await readWalletBalance(app, 'Wallet balance after gift card payment'), 'The wallet was not charged')
       .toBeCloseTo(walletBefore, 3);
     const history = await bookingHistory(app);
-    expect(history[0]?.status, 'History lists the new gift card booking as upcoming').toBe('Upcoming');
-    expect((await firstHistoryPaymentDetails(app)).bookingId, 'History shows the gift card booking').toBe(bookingId);
+    // Wallet recharges (also by other suites on the shared customer) can be listed above the booking.
+    const newest = newestBookingIndex(history);
+    expect(history[newest]?.status, 'History lists the new gift card booking as upcoming').toBe('Upcoming');
+    expect((await historyPaymentDetails(app, newest)).bookingId, 'History shows the gift card booking').toBe(bookingId);
     await snap(`AND-29: History shows gift card booking ${bookingId}`);
 
     await cancelBooking(app, bookingId);

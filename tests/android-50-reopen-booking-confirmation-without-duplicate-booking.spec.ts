@@ -4,7 +4,8 @@ import {
   bookingHistory,
   cancelBooking,
   cleanUpBooking,
-  firstHistoryPaymentDetails,
+  historyPaymentDetails,
+  newestBookingIndex,
   hasKioskCustomer,
   openPaymentMethods,
   openUpcomingTicket,
@@ -23,7 +24,8 @@ const amountsOnScreen = async (app: AndroidApp) => [...(await app.getPageSource(
   .map((text) => readKwd(text, 'Ticket amount'));
 
 test('AND-50 Reopen booking confirmation without duplicate booking', async ({ app, snap, androidConfig }) => {
-  test.setTimeout(720_000);
+  // Four full walks of the Upcoming list, which opens every ticket and is long for the shared customer (UAT, 18 Oct).
+  test.setTimeout(1_200_000);
   if (!hasKioskCustomer(androidConfig)) {
     throw new Error('AND-50 needs the configured Kiosk UAT customer (username, password and OTP), whose wallet pays for the test booking.');
   }
@@ -108,8 +110,10 @@ test('AND-50 Reopen booking confirmation without duplicate booking', async ({ ap
   expect(await readWalletBalance(app, 'Wallet balance after cancelling'), 'Cancelling refunds the wallet').toBeCloseTo(balanceBefore, 3);
   // History lists bookings once they are cancelled or past: this one appears once, as the newest entry.
   const history = await bookingHistory(app);
-  expect(history[0], `History lists the ${title} booking first, cancelled`).toMatchObject({ status: 'Cancelled' });
-  expect(history[0].title.toLowerCase()).toContain(title.toLowerCase().trim());
-  expect((await firstHistoryPaymentDetails(app)).bookingId, 'The newest History entry is this booking').toBe(bookingId);
+  // Wallet recharges (also by other suites on the shared customer) can be listed above the booking.
+  const newest = newestBookingIndex(history);
+  expect(history[newest], `History lists the ${title} booking first, cancelled`).toMatchObject({ status: 'Cancelled' });
+  expect(history[newest].title.toLowerCase()).toContain(title.toLowerCase().trim());
+  expect((await historyPaymentDetails(app, newest)).bookingId, 'The newest History entry is this booking').toBe(bookingId);
   await snap(`AND-50: History shows ${bookingId} once, cancelled and refunded`);
 });

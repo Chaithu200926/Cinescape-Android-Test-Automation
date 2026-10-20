@@ -2,6 +2,7 @@ import { test, expect } from '../src/fixtures';
 import {
   beginCaseJourney,
   bookingHistory,
+  newestBookingIndex,
   cancelBooking,
   cleanUpBooking,
   hasKioskCustomer,
@@ -14,7 +15,8 @@ import {
 } from '../src/android-navigation';
 
 test('AND-26 Pay by wallet, then cancel', async ({ app, snap, androidConfig }) => {
-  test.setTimeout(600_000);
+  // The Upcoming list of the shared customer can be long, and each walk opens every ticket (UAT, 18 Oct).
+  test.setTimeout(900_000);
   if (!hasKioskCustomer(androidConfig)) {
     throw new Error('AND-26 needs the configured Kiosk UAT customer (username, password and OTP), whose wallet pays for the test booking.');
   }
@@ -22,7 +24,6 @@ test('AND-26 Pay by wallet, then cancel', async ({ app, snap, androidConfig }) =
   // 1. Sign in with the wallet test customer and note the balance.
   await beginCaseJourney(app, androidConfig, snap, 'account', true, 'AND-26', 'kiosk');
   const balanceBefore = await readWalletBalance(app, 'Wallet balance before booking');
-  const idsBefore = await upcomingBookingIds(app);
   await snap(`AND-26: wallet balance before booking KWD ${balanceBefore.toFixed(3)}`);
 
   // 2. Book one ticket for the next day's show and pay it with the wallet.
@@ -43,13 +44,7 @@ test('AND-26 Pay by wallet, then cancel', async ({ app, snap, androidConfig }) =
     await app.back();
     const balanceAfterPayment = await readWalletBalance(app, 'Wallet balance after payment');
     expect(balanceBefore - balanceAfterPayment, `The wallet is charged KWD ${total.toFixed(3)}`).toBeCloseTo(total, 3);
-    const idsAfterPayment = await upcomingBookingIds(app);
-    expect(idsAfterPayment, 'The new booking is listed under Upcoming Bookings').toContain(bookingId);
-    // The customer is shared with the Kiosk and Web suites, so other new bookings are recorded, not failed on.
-    const othersAdded = idsAfterPayment.filter((id) => id !== bookingId && !idsBefore.includes(id));
-    if (othersAdded.length) {
-      test.info().annotations.push({ type: 'note', description: `Other bookings also appeared under Upcoming Bookings: ${othersAdded.join(', ')}` });
-    }
+    // Opening the ticket from Upcoming Bookings shows it is listed there (it fails with "not listed" otherwise).
     await openUpcomingTicket(app, bookingId);
     expect((await readTicketDetails(app)).hasQrCode, 'The listed ticket shows a QR code').toBe(true);
     await snap(`AND-26: ticket ${bookingId} opened from Upcoming Bookings`);
@@ -68,7 +63,9 @@ test('AND-26 Pay by wallet, then cancel', async ({ app, snap, androidConfig }) =
   const balanceAfterCancel = await readWalletBalance(app, 'Wallet balance after cancelling');
   expect(balanceAfterCancel, 'The wallet is refunded to its original balance').toBeCloseTo(balanceBefore, 3);
   const history = await bookingHistory(app);
-  expect(history[0], `History lists the cancelled ${title} booking first`).toMatchObject({ status: 'Cancelled' });
-  expect(history[0].title.toLowerCase()).toContain(title.toLowerCase().trim());
+  // Wallet recharges (also by other suites on the shared customer) can be listed above the booking.
+  const newest = newestBookingIndex(history);
+  expect(history[newest], `History lists the cancelled ${title} booking first`).toMatchObject({ status: 'Cancelled' });
+  expect(history[newest].title.toLowerCase()).toContain(title.toLowerCase().trim());
   await snap(`AND-26: ${dateLabel} booking cancelled and KWD ${total.toFixed(3)} refunded to the wallet`);
 });

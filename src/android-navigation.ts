@@ -633,9 +633,13 @@ export const readKwd = (text: string, label: string) => {
 const id = (name: string) => `id=com.cinescape:id/${name}`;
 const byText = (text: string) => `android=new UiSelector().text("${text}")`;
 
-/** The Internal builds' web support chat ("Cinescape chat", Pair AI agent) is open. */
+/**
+ * The Internal builds' web support chat (Pair AI agent) is open. Its "Powered by" footer shows only inside the open
+ * chat; the title "Cinescape chat" stays in the screen tree on Account even when the chat is closed (UAT new app,
+ * 18 Oct), and pressing Back on that false alarm walked the test off the Account screen.
+ */
 export const supportChatIsOpen = async (app: AndroidApp) =>
-  app.$('//*[@text="Cinescape chat" or @text="Powered by"]').isDisplayed().catch(() => false);
+  app.$('//*[@text="Powered by"]').isDisplayed().catch(() => false);
 
 /**
  * Closes the support chat when it is open: its own Close button ("إغلاق" in Arabic, the default language), else Back.
@@ -959,6 +963,29 @@ export const cancelUnpaidCheckout = async (app: AndroidApp) => {
 };
 
 /**
+ * Drags the Account list up by about 600 px and holds before lifting the finger. A quick swipe flings the list on, past
+ * whole booking cards (about 930 px apart on the Internal builds), which the walk then missed (AND-50, 18 Oct). The drag
+ * runs down the left side, clear of the support-chat bubble at the bottom right.
+ */
+const dragAccountList = async (app: AndroidApp) => {
+  await app.performActions([{
+    type: 'pointer',
+    id: 'finger',
+    parameters: { pointerType: 'touch' },
+    actions: [
+      { type: 'pointerMove', duration: 0, x: 300, y: 1900 },
+      { type: 'pointerDown', button: 0 },
+      { type: 'pause', duration: 150 },
+      { type: 'pointerMove', duration: 900, x: 300, y: 1300 },
+      { type: 'pause', duration: 500 },
+      { type: 'pointerUp', button: 0 },
+    ],
+  }]);
+  await app.releaseActions();
+  await app.pause(700);
+};
+
+/**
  * Walks Account > Your Upcoming Bookings, opening each card's ticket to read its Booking ID.
  * Only the cards on screen exist in the UI tree, so the list is scrolled until it stops moving.
  * Stops with the ticket open when `stopAt` is found; otherwise returns every Booking ID.
@@ -967,9 +994,27 @@ const walkUpcomingTickets = async (app: AndroidApp, stopAt?: string) => {
   await openAccountTop(app);
   const heading = app.$(id('text_upcoming_booking'));
   await heading.waitForDisplayed({ timeout: 30_000, timeoutMsg: 'Account did not show Your Upcoming Bookings' }).catch(() => undefined);
+  // The cards arrive after the heading; read too early, the list looked empty and the walk ended with "listed: none"
+  // (AND-41, UAT new app 18 Oct). With no upcoming bookings Account says "There are no active bookings." instead.
+  const listLoaded = async () => (await app.$$(id('imageView7')).length) > 0 || app.$(id('noHistory')).isDisplayed().catch(() => false);
+  await app.waitUntil(listLoaded, { timeout: 20_000 }).catch(() => undefined);
+  // Positions of the cards on screen: when it stops changing, the end of the list has been reached.
+  const cardsOnScreen = async () => (await app.$$(id('imageView7')).map(async (card) => {
+    const { y } = await card.getLocation();
+    const { height } = await card.getSize();
+    return `${y}+${height}`;
+  })).join(',') + (await heading.getLocation().then(({ y }) => y).catch(() => -1));
+  // Back from a ticket can rebuild Account at its top; the list is then dragged back to where the walk was.
+  let drags = 0;
+  const restoreScroll = async (expected: string) => {
+    if (await cardsOnScreen() === expected) return;
+    await openAccountTop(app);
+    await app.waitUntil(listLoaded, { timeout: 20_000 }).catch(() => undefined);
+    for (let drag = 0; drag < drags; drag += 1) await dragAccountList(app);
+  };
   const ids: string[] = [];
   let previousScreen = '';
-  for (let page = 0; page < 30; page += 1) {
+  for (let page = 0; page < 40; page += 1) {
     const cardCount = await app.$$(id('imageView7')).length;
     // Held food orders ("Food Order", "74 - In Queue", Prepare Food) are listed among the bookings but open no ticket.
     const foodOrderTops = await app.$$(byText('Food Order')).map(async (label) => (await label.getLocation()).y);
@@ -986,7 +1031,8 @@ const walkUpcomingTickets = async (app: AndroidApp, stopAt?: string) => {
       // On the Internal builds a tap made while Account is still settling can land on the support-chat launcher
       // instead of the card; let the screen settle, and if the chat (or anything but the ticket) opens, go back and tap again.
       const ticketId = app.$(id('text_bookin_id_no'));
-      await app.pause(1_500);
+      await app.pause(1_000);
+      const before = await cardsOnScreen();
       await card.click();
       if (!(await ticketId.waitForDisplayed({ timeout: 15_000 }).catch(() => false))) {
         await app.back();
@@ -1000,13 +1046,14 @@ const walkUpcomingTickets = async (app: AndroidApp, stopAt?: string) => {
       if (!ids.includes(bookingId)) ids.push(bookingId);
       await app.back();
       await app.$(id('recyclerview_booking')).waitForDisplayed({ timeout: 20_000, timeoutMsg: 'Back from the ticket did not return to Account' });
+      await app.pause(800);
+      await restoreScroll(before);
     }
-    const screen = (await app.$$(id('txt_date')).map(async (el) => el.getLocation().then(({ y }) => y))).join(',')
-      + (await app.$(id('text_upcoming_booking')).getLocation().then(({ y }) => y).catch(() => -1));
+    const screen = await cardsOnScreen();
     if (screen === previousScreen || !(await app.$(id('recyclerview_booking')).isDisplayed().catch(() => false))) break;
     previousScreen = screen;
-    await app.execute('mobile: swipeGesture', { left: 80, top: 1300, width: 920, height: 900, direction: 'up', percent: 0.6 });
-    await app.pause(1_000);
+    await dragAccountList(app);
+    drags += 1;
   }
   if (stopAt) throw new Error(`Booking ${stopAt} is not listed under Your Upcoming Bookings (listed: ${ids.join(', ') || 'none'}).`);
   return ids;
@@ -1046,8 +1093,11 @@ export const readTicketDetails = async (app: AndroidApp) => {
 
 /** Cancels a confirmed booking from its ticket ("Cancel Reservation" > "Yes, I'm Sure"). */
 export const cancelBooking = async (app: AndroidApp, bookingId: string) => {
-  await openUpcomingTicket(app, bookingId);
+  // Walking a long Upcoming list takes minutes, so a ticket that is already open is cancelled from where it is.
+  // The confirmation screen right after paying shows the Booking ID too, but has no Cancel Reservation.
   const cancel = app.$(id('textView48'));
+  const openTicket = (await app.$(id('text_bookin_id_no')).getText().catch(() => '')).trim();
+  if (openTicket !== bookingId || !(await cancel.isDisplayed().catch(() => false))) await openUpcomingTicket(app, bookingId);
   await cancel.waitForDisplayed({ timeout: 15_000, timeoutMsg: `The ticket for ${bookingId} did not offer Cancel Reservation` });
   await cancel.click();
   const sure = app.$(id('consSure'));
@@ -1089,15 +1139,40 @@ export const bookingHistory = async (app: AndroidApp) => {
     timeout: 45_000,
     timeoutMsg: 'History showed neither entries nor an empty state',
   });
-  const titles = await app.$$(id('text_booking_history_title')).map(async (el) => (await el.getText()).trim());
-  const dates = await app.$$(id('text_booking_history_date')).map(async (el) => (await el.getText()).trim());
-  const statuses = await app.$$(id('text_booking_history_time')).map(async (el) => (await el.getText()).trim());
-  return titles.map((title, index): HistoryEntry => ({ title, date: dates[index] ?? '', status: statuses[index] ?? '' }));
+  // Rows differ (a Wallet Recharge has no status), so each title takes the date and status shown in its own row -
+  // below it and above the next title - rather than the one at the same position in the list (18 Oct).
+  const read = async (name: string) => app.$$(id(name)).map(async (el) => ({ y: (await el.getLocation()).y, text: (await el.getText()).trim() }));
+  // The last row can be cut off by the tab bar, with its title on screen but its date and status below the edge (UAT
+  // new app, 20 Oct); only rows whose date and status lines (about 120 px below the title's top) are on screen are read.
+  const listBottom = await list.getLocation().then(async ({ y }) => y + (await list.getSize()).height).catch(() => Infinity);
+  const titles = (await read('text_booking_history_title')).filter((title) => title.y + 120 <= listBottom).sort((a, b) => a.y - b.y);
+  const dates = await read('text_booking_history_date');
+  const statuses = await read('text_booking_history_time');
+  return titles.map((title, index): HistoryEntry => {
+    const inRow = (list: { y: number; text: string }[]) =>
+      list.find((field) => field.y >= title.y - 40 && field.y < (titles[index + 1]?.y ?? Infinity) - 40)?.text ?? '';
+    return { title: title.text, date: inRow(dates), status: inRow(statuses) };
+  });
 };
 
-/** Expands the first History entry and returns its Booking ID and Track ID. */
-export const firstHistoryPaymentDetails = async (app: AndroidApp) => {
-  await app.$(id('view_booking_history')).click();
+/** Taps the History entry at `index` (in screen order, as `bookingHistory` lists them) to expand its details. */
+export const expandHistoryEntry = async (app: AndroidApp, index: number) => {
+  const rows = await app.$$(id('view_booking_history')).map(async (row) => ({ row, y: (await row.getLocation()).y }));
+  const target = rows.sort((a, b) => a.y - b.y)[index];
+  if (!target) throw new Error(`History has no entry ${index + 1} on screen to expand`);
+  await target.row.click();
+};
+
+/**
+ * Position in History of the newest booking. Wallet recharges and food-only orders are listed too, and one can sit above
+ * the booking a test just made: the customer's wallet is shared with other suites, which recharged it mid-test (20 Oct).
+ */
+export const newestBookingIndex = (entries: HistoryEntry[]) =>
+  Math.max(0, entries.findIndex((entry) => !['Wallet Recharge', 'Food Order'].includes(entry.title)));
+
+/** Expands a History entry (by default the newest booking's position from `newestBookingIndex`) and returns its Booking ID and Track ID. */
+export const historyPaymentDetails = async (app: AndroidApp, index = 0) => {
+  await expandHistoryEntry(app, index);
   await app.$(id('tvTrackId')).waitForDisplayed({ timeout: 15_000, timeoutMsg: 'The history entry did not expand its payment details' });
   const value = async (name: string) => (await app.$(id(name)).getText().catch(() => '')).trim();
   return { bookingId: await value('tvBookingIdNumber'), trackId: await value('tvTrackIdNumber') };
