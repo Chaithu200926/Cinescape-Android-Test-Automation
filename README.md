@@ -153,3 +153,4 @@ Android's protection, not a test failure.
 - **"ANDROID_APK_PATH points to a missing file"** or install errors: point it at the single `.apk` file. Some shared
   copies have a hidden `.apk.zip` extension; an unzipped APK folder cannot be installed.
 - **Appium does not start**: see `android-results/appium.log`; another Appium may already use port 4723.
+
