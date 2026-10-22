@@ -3,7 +3,7 @@ import {
   type AndroidApp,
   beginCaseJourney,
   cancelUnpaidCheckout,
-  openFirstMovieDetails,
+  openMovieDetails,
   readKwd,
   tapElementCenter,
 } from '../src/android-navigation';
@@ -36,47 +36,98 @@ const readShowtimes = async (app: AndroidApp) => {
 const chipLabel = async (chip: WebdriverIO.Element) =>
   (await chip.$$('android.widget.TextView').map(async (label) => (await label.getText()).trim())).filter(Boolean).join(' ');
 
-const visibleDates = async (app: AndroidApp) => {
+const readDates = async (app: AndroidApp) => {
+  const { width } = await app.getWindowSize();
   const dates: { label: string; chip: WebdriverIO.Element }[] = [];
   for (const chip of await app.$$(id('card_day_date'))) {
+    // The strip recycles its chips: ones parked off screen can still carry an old date, so only on-screen chips count.
+    const { x } = await chip.getLocation().catch(() => ({ x: -1 }));
+    if (x < 0 || x >= width || !(await chip.isDisplayed().catch(() => false))) continue;
     const label = await chipLabel(chip);
     if (/^\S+ \d{2}$/.test(label)) dates.push({ label, chip });
   }
   return dates;
 };
 
-/** Swipes the sideways-scrolling date strip; "left" reveals later dates. */
-const swipeDateStrip = async (app: AndroidApp, direction: 'left' | 'right') => {
-  const { y } = await app.$(id('card_day_date')).getLocation();
-  await app.execute('mobile: swipeGesture', { left: 60, top: y + 10, width: 960, height: 80, direction, percent: 0.7 });
-  await app.pause(600);
+/** The on-screen dates once the strip has stopped moving (two reads in a row agree). */
+const visibleDates = async (app: AndroidApp) => {
+  let last = await readDates(app);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await app.pause(400);
+    const now = await readDates(app);
+    if (now.map((d) => d.label).join() === last.map((d) => d.label).join()) return now;
+    last = now;
+  }
+  return last;
 };
 
-/** Every date the strip offers, in order, gathered by scrolling it end to end. */
-const allDates = async (app: AndroidApp) => {
-  for (let swipe = 0; swipe < 12; swipe += 1) await swipeDateStrip(app, 'right');
+/**
+ * Drags the sideways date strip by about three dates and holds before lifting, so it does not fling on: a quick swipe
+ * skipped whole runs of dates (21 Oct). "left" reveals later dates.
+ */
+const swipeDateStrip = async (app: AndroidApp, direction: 'left' | 'right') => {
+  const { y } = await app.$(id('card_day_date')).getLocation();
+  const [from, to] = direction === 'left' ? [800, 380] : [380, 800];
+  await app.performActions([{
+    type: 'pointer',
+    id: 'finger',
+    parameters: { pointerType: 'touch' },
+    actions: [
+      { type: 'pointerMove', duration: 0, x: from, y: y + 50 },
+      { type: 'pointerDown', button: 0 },
+      { type: 'pause', duration: 150 },
+      { type: 'pointerMove', duration: 700, x: to, y: y + 50 },
+      { type: 'pause', duration: 400 },
+      { type: 'pointerUp', button: 0 },
+    ],
+  }]);
+  await app.releaseActions();
+  await app.pause(500);
+};
+
+/** Drags the strip one way until it stops moving (its visible dates stay the same). */
+const dragToEnd = async (app: AndroidApp, direction: 'left' | 'right') => {
+  let shown = (await visibleDates(app)).map((date) => date.label).join();
+  for (let drag = 0; drag < 40; drag += 1) {
+    await swipeDateStrip(app, direction);
+    const now = (await visibleDates(app)).map((date) => date.label).join();
+    if (now === shown) return;
+    shown = now;
+  }
+};
+
+/** Every date the strip offers, in order, gathered by dragging it end to end; each page is kept as a screenshot. */
+const allDates = async (app: AndroidApp, snap?: (label: string) => Promise<void>) => {
+  await dragToEnd(app, 'right');
   const labels: string[] = [];
-  for (let page = 0; page < 15; page += 1) {
+  for (let page = 0; page < 40; page += 1) {
+    const shown = (await visibleDates(app)).map((date) => date.label);
     const before = labels.length;
-    for (const { label } of await visibleDates(app)) if (!labels.includes(label)) labels.push(label);
+    for (const label of shown) if (!labels.includes(label)) labels.push(label);
+    if (snap && labels.length > before) await snap(`AND-15: date strip page ${page + 1}: ${shown.join(', ')}`);
     if (labels.length === before && page > 0) break;
     await swipeDateStrip(app, 'left');
   }
-  for (let swipe = 0; swipe < 12; swipe += 1) await swipeDateStrip(app, 'right');
+  await dragToEnd(app, 'right');
   return labels;
 };
 
 /** The date strip scrolls sideways, so dates are found by label rather than position. */
 const chooseDate = async (app: AndroidApp, label: string) => {
-  for (const direction of ['right', 'left'] as const) {
-    // UAT offers shows a month or more ahead (e.g. Fri 13 Nov seen on 11 Oct), so the strip is long.
-    for (let swipe = 0; swipe < 15; swipe += 1) {
-      const match = (await visibleDates(app)).find((date) => date.label === label);
+  // Dates are chosen in strip order, so the next one is usually on screen or a drag to the left (later dates).
+  for (const direction of ['left', 'right'] as const) {
+    let shown = '';
+    for (let drag = 0; drag < 40; drag += 1) {
+      const dates = await visibleDates(app);
+      const match = dates.find((date) => date.label === label);
       if (match) {
         await tapElementCenter(app, match.chip.$(id('text_date')));
         await app.pause(1_200);
         return;
       }
+      const now = dates.map((date) => date.label).join();
+      if (now === shown) break;
+      shown = now;
       await swipeDateStrip(app, direction);
     }
   }
@@ -97,13 +148,36 @@ test('AND-15 Location, dates and showtimes', async ({ app, snap, androidConfig }
   test.setTimeout(600_000);
   await beginCaseJourney(app, androidConfig, snap, 'movies', true, 'AND-15', 'kiosk');
 
-  // 1–2. The movie opens at Cinescape 360 with today and future dates.
-  const { title } = await openFirstMovieDetails(app);
-  expect((await app.$(id('cinemaName')).getText()).trim()).toBe('Cinescape 360');
-  expect((await app.$(id('textView110')).getText()).trim()).toBe('360 Mall, Zahra');
-  const dateLabels = await allDates(app);
-  expect(dateLabels.length, 'Today and at least one future date are offered').toBeGreaterThan(1);
-  expect(dateLabels[0]).toMatch(/^Today \d{2}$/);
+  // 1–2. A movie opens at Cinescape 360 with today and future dates. A movie with no shows today starts its strip at a
+  // future date (correct, confirmed on Pre-UAT, UAT and the website), so the next movies are tried until one shows "Today".
+  let title = '';
+  let dateLabels: string[] = [];
+  const withoutToday: string[] = [];
+  for (let index = 0; index < 6; index += 1) {
+    const opened = await openMovieDetails(app, index);
+    if (!opened) break;
+    if (title) withoutToday.push(title);
+    title = opened.title;
+    expect((await app.$(id('cinemaName')).getText()).trim()).toBe('Cinescape 360');
+    expect((await app.$(id('textView110')).getText()).trim()).toBe('360 Mall, Zahra');
+    dateLabels = await allDates(app, snap);
+    if (/^Today \d{2}$/.test(dateLabels[0] ?? '')) break;
+    await snap(`AND-15: ${title} has no shows today (dates start ${dateLabels[0]})`);
+    await app.back();
+  }
+  const hasToday = /^Today \d{2}$/.test(dateLabels[0] ?? '');
+  if (!hasToday) {
+    withoutToday.push(title);
+    await openMovieDetails(app, withoutToday.length - 1);
+  }
+  test.info().annotations.push({
+    type: 'today',
+    description: hasToday
+      ? `${title} lists Today first${withoutToday.length ? `; no shows today for ${withoutToday.join(', ')}` : ''}.`
+      : `No movie on the first screen has shows today (${withoutToday.join(', ')}); the Today label could not be checked.`,
+  });
+  expect(dateLabels.length, 'At least one future date is offered').toBeGreaterThan(hasToday ? 1 : 0);
+  for (const date of dateLabels.slice(hasToday ? 1 : 0)) expect(date, 'Only the first date can be Today').not.toMatch(/^Today\b/);
   expect(new Set(dateLabels).size, 'Every date is listed once').toBe(dateLabels.length);
   await snap(`AND-15: ${title} dates ${dateLabels.join(', ')}`);
 
@@ -123,12 +197,12 @@ test('AND-15 Location, dates and showtimes', async ({ app, snap, androidConfig }
     type: 'schedule',
     description: Object.entries(schedule).map(([date, groups]) => `${date}: ${groups.map((times) => times.join(' ')).join(' | ') || 'none'}`).join('; '),
   });
-  const futureDates = dateLabels.slice(1).filter((date) => schedule[date].length > 0);
+  const futureDates = dateLabels.slice(hasToday ? 1 : 0).filter((date) => schedule[date].length > 0);
   expect(futureDates.length, 'At least one future date has showtimes').toBeGreaterThan(0);
 
   // 4. Today's shows that have already started are not offered.
   const now = kuwaitMinutesNow();
-  const startedToday = schedule[dateLabels[0]].flat()
+  const startedToday = (hasToday ? schedule[dateLabels[0]] : []).flat()
     .filter((time) => minutesOf(time) >= 6 * 60 && minutesOf(time) < now);
   expect(startedToday, 'Showtimes that have already started today are not offered').toEqual([]);
   await snap(`AND-15: ${Object.values(schedule).flat(2).length} showtimes across ${dateLabels.length} dates`);

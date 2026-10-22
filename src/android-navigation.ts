@@ -292,8 +292,16 @@ export const readMovieList = async (app: AndroidApp) => {
   return [...movies.values()];
 };
 
-export const openFirstMovieDetails = async (app: AndroidApp) => {
-  const movieCard = await openMoviesList(app);
+/** Opens the details of the Now Showing card at `index` among the cards on the first screen; null when there is none. */
+export const openMovieDetails = async (app: AndroidApp, index: number) => {
+  await openMoviesList(app);
+  const card = (await app.$$('id=com.cinescape:id/card_now_showing'))[index];
+  return card ? openCardDetails(app, card) : null;
+};
+
+export const openFirstMovieDetails = async (app: AndroidApp) => openCardDetails(app, await openMoviesList(app));
+
+const openCardDetails = async (app: AndroidApp, movieCard: WebdriverIO.Element | ChainablePromiseElement) => {
   const title = (await movieCard.$('id=com.cinescape:id/text_movie_title').getText()).trim();
   if (!title) throw new Error('The first Now Showing movie card has no accessible title.');
 

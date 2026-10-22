@@ -6,6 +6,7 @@ import {
   cancelUnpaidCheckout,
   changeFoodQuantity,
   openArea,
+  openFoodPreparationChoice,
   readFoodCart,
   readKwd,
   selectOneSeat,
@@ -46,6 +47,12 @@ test('AND-21 Food with a ticket (today and a future date)', async ({ app, snap, 
 
   // 1. A ticket for today offers food; adding, increasing and decreasing update the cart at once.
   const today = await bookOneSeat(app, snap, 'today');
+  if (!today.offersFood) {
+    // Food is on hold while the pickup location is closed (as for AND-22 to 24): the Food tab then skips the case.
+    await cancelUnpaidCheckout(app);
+    await openArea(app, 'food');
+    await openFoodPreparationChoice(app);
+  }
   expect(today.offersFood, "Today's ticket offers the food step").toBe(true);
   expect((await app.$(id('txtSkipBtn')).getText()).trim()).toBe('Skip');
   const combo = await addFirstCombo(app);
