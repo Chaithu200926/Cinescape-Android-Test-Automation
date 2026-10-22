@@ -16,6 +16,25 @@ const connectedDevices = () =>
     .filter(([, state]) => state === 'device')
     .map(([serial]) => serial);
 
+/** Keep the visible Android emulator centered on the Windows desktop for every test run. */
+const centerVisibleEmulator = () => {
+  if (process.platform !== 'win32' || androidConfig.headless) return;
+  try {
+    execFileSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', path.join(process.cwd(), 'scripts', 'center-emulator.ps1'),
+      '-AvdName', androidConfig.avdName,
+      '-Port', '5554',
+    ], {
+      env: process.env,
+      stdio: 'ignore',
+      timeout: 20_000,
+    });
+  } catch (error) {
+    console.warn(`[android] Could not center the emulator window: ${String(error)}`);
+  }
+};
+
 const appiumIsUp = async () => {
   try {
     const response = await fetch(`http://127.0.0.1:${androidConfig.appiumPort}/status`);
@@ -95,7 +114,9 @@ const bootEmulator = async (): Promise<ChildProcess> => {
   ensureAvdExists();
   ensureAcceleration();
   console.log(`[android] Starting emulator "${androidConfig.avdName}"...`);
-  const args = ['-avd', androidConfig.avdName, '-no-boot-anim', '-no-snapshot-save', '-gpu', 'auto'];
+  // Always a cold boot: resuming the Quick Boot snapshot carried a slowed-down system over from earlier runs.
+  // Read-only mode lets AND-49 boot a second instance from the same AVD for a concurrent seat-hold check.
+  const args = ['-avd', androidConfig.avdName, '-no-boot-anim', '-no-snapshot-load', '-no-snapshot-save', '-gpu', 'auto', '-read-only'];
   if (androidConfig.headless) args.push('-no-window');
   const emulator = spawn(androidTools.emulator, args, { env: androidTools.env(), stdio: 'ignore', detached: true });
   emulator.unref();
@@ -124,7 +145,7 @@ const bootEmulator = async (): Promise<ChildProcess> => {
 const startAppium = async (): Promise<ChildProcess> => {
   console.log(`[android] Starting Appium on port ${androidConfig.appiumPort}...`);
   const appiumMain = path.join(path.dirname(require.resolve('appium/package.json')), 'index.js');
-  const logDir = path.resolve('android-results');
+  const logDir = path.resolve(androidConfig.site.resultsFolder);
   fs.mkdirSync(logDir, { recursive: true });
   const log = fs.openSync(path.join(logDir, 'appium.log'), 'w');
   const appium = spawn(process.execPath, [appiumMain, '--port', String(androidConfig.appiumPort), '--log-no-colors'], {
@@ -134,11 +155,11 @@ const startAppium = async (): Promise<ChildProcess> => {
 
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
-    if (appium.exitCode !== null) throw new Error('Appium stopped during start-up. See android-results/appium.log.');
+    if (appium.exitCode !== null) throw new Error(`Appium stopped during start-up. See ${androidConfig.site.resultsFolder}/appium.log.`);
     if (await appiumIsUp()) return appium;
     await sleep(1_000);
   }
-  throw new Error('Appium did not start within 60 seconds. See android-results/appium.log.');
+  throw new Error(`Appium did not start within 60 seconds. See ${androidConfig.site.resultsFolder}/appium.log.`);
 };
 
 /**
@@ -150,13 +171,32 @@ export default async function globalSetup() {
     throw new Error(`adb was not found at ${androidTools.adb}. Set ANDROID_HOME to your Android SDK folder.`);
   }
   if (androidConfig.apkPath && !fs.existsSync(androidConfig.apkPath)) {
-    throw new Error(`ANDROID_APK_PATH points to a missing file: ${androidConfig.apkPath}`);
+    throw new Error(`${androidConfig.site.apkEnv} points to a missing file: ${androidConfig.apkPath}`);
   }
+
+  const { label, apiHost, apiPort } = androidConfig.site;
+  console.log(`[android] Testing the ${label} build (${apiHost}:${apiPort}): ${androidConfig.apkPath || 'the copy already installed'}`);
 
   /* Appium's child processes need these too. */
   Object.assign(process.env, androidTools.env());
 
   const startedEmulator = connectedDevices().length ? undefined : await bootEmulator();
+  centerVisibleEmulator();
+  /*
+   * Stop the Play Store updating apps during the run: on 15 Oct an Android System WebView update killed the Cinescape
+   * app mid-test ("stop com.google.android.webview due to installPackageLI"), which looked like an app crash.
+   * The emulator boots read-only, so this is done on every run.
+   */
+  try { adb('shell', 'pm', 'disable-user', '--user', '0', 'com.android.vending'); } catch { /* a phone may not allow it */ }
+  /*
+   * The build is installed once per run (-g grants its permissions); each test then clears the app's data instead of
+   * reinstalling it (see the app fixture), which saves about a minute per test and keeps every test independent.
+   */
+  if (androidConfig.apkPath) {
+    console.log('[android] Installing the build once for this run...');
+    try { adb('uninstall', androidConfig.appPackage); } catch { /* not installed */ }
+    execFileSync(androidTools.adb, ['install', '-g', androidConfig.apkPath], { env: androidTools.env(), encoding: 'utf8', timeout: 180_000 });
+  }
   const startedAppium = (await appiumIsUp()) ? undefined : await startAppium();
 
   return async () => {
